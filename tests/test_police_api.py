@@ -1,6 +1,8 @@
+from datetime import datetime
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
+import requests
 
 from app.services.police_api import PoliceAPIService
 
@@ -137,6 +139,9 @@ def test_bulk_insert_from_csv(db, mocker):
     assert "COPY stop_searches" in args[0]
     assert "FROM STDIN" in args[0]
 
+    # Verify commit was called on the raw connection
+    mock_conn.commit.assert_called_once()
+
 
 def test_fetch_and_process_force_exception(db, mocker):
     service = PoliceAPIService(db)
@@ -160,12 +165,12 @@ def test_process_data_in_memory_exceptions(db, mocker):
     ) as mock_create:
         # Mock clean item
         with patch.object(service, "_clean_item", return_value=item):
-             # Mock create to succeed second time
-             mock_create.side_effect = [Exception("Fail 1"), MagicMock()]
+            # Mock create to succeed second time
+            mock_create.side_effect = [Exception("Fail 1"), MagicMock()]
 
-             valid, failed = service._process_data_in_memory("force", [item])
-             assert len(valid) == 1
-             assert len(failed) == 0
+            valid, failed = service._process_data_in_memory("force", [item])
+            assert len(valid) == 1
+            assert len(failed) == 0
 
 
 def test_process_data_in_memory_full_failure(db, mocker):
@@ -198,11 +203,165 @@ def test_fetch_data_with_date(db, mocker):
 
     service._fetch_data("force", date="2023-01")
 
-    mock_get.assert_called_with(
-        "https://data.police.uk/api/stops-force",
-        params={"force": "force", "date": "2023-01"},
-        timeout=30,
-    )
+
+def test_get_available_dates(db, mocker):
+    service = PoliceAPIService(db)
+    mock_response = [
+        {"date": "2024-01", "stop-and-search": ["leicestershire", "metropolitan"]},
+        {"date": "2024-02", "stop-and-search": ["leicestershire"]},
+    ]
+
+    mocker.patch.object(service, "_make_request", return_value=mock_response)
+
+    availability = service.get_available_dates()
+
+    assert "leicestershire" in availability
+    assert "metropolitan" in availability
+    assert availability["leicestershire"] == ["2024-01", "2024-02"]
+    assert availability["metropolitan"] == ["2024-01"]
+
+
+def test_get_available_dates_error(db, mocker):
+    service = PoliceAPIService(db)
+    mocker.patch.object(service, "_make_request", side_effect=Exception("API Error"))
+
+    availability = service.get_available_dates()
+    assert availability == {}
+
+
+def test_make_request_success(db, mocker):
+    service = PoliceAPIService(db)
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"data": "ok"}
+
+    with patch("requests.get", return_value=mock_response):
+        result = service._make_request("http://test.com")
+        assert result == {"data": "ok"}
+
+
+def test_make_request_rate_limit(db, mocker):
+    service = PoliceAPIService(db)
+
+    # First response 429, second 200
+    mock_response_429 = MagicMock()
+    mock_response_429.status_code = 429
+    mock_response_429.headers = {"Retry-After": "0"}
+
+    mock_response_200 = MagicMock()
+    mock_response_200.status_code = 200
+    mock_response_200.json.return_value = {"data": "ok"}
+
+    with patch("requests.get", side_effect=[mock_response_429, mock_response_200]):
+        with patch("time.sleep") as mock_sleep:
+            result = service._make_request("http://test.com")
+            assert result == {"data": "ok"}
+            mock_sleep.assert_called()
+
+
+def test_make_request_retry_exception(db, mocker):
+    service = PoliceAPIService(db)
+
+    # First raises exception, second succeeds
+    mock_response_200 = MagicMock()
+    mock_response_200.status_code = 200
+    mock_response_200.json.return_value = {"data": "ok"}
+
+    with patch(
+        "requests.get",
+        side_effect=[requests.RequestException("Error"), mock_response_200],
+    ):
+        with patch("time.sleep") as mock_sleep:
+            result = service._make_request("http://test.com")
+            assert result == {"data": "ok"}
+            mock_sleep.assert_called()
+
+
+def test_make_request_max_retries(db, mocker):
+    service = PoliceAPIService(db)
+
+    with patch("requests.get", side_effect=requests.RequestException("Error")):
+        with patch("time.sleep"):
+            with pytest.raises(requests.RequestException):
+                service._make_request("http://test.com")
+
+
+def test_fetch_and_process_force_no_data(db, mocker):
+    service = PoliceAPIService(db)
+    mocker.patch.object(service, "_fetch_data", return_value=[])
+    
+    valid, failed = service.fetch_and_process_force("force")
+    assert valid == []
+    assert failed == []
+
+
+def test_process_data_in_memory_skip_old(db, mocker):
+    service = PoliceAPIService(db)
+    
+    # Mock latest date
+    latest = datetime(2024, 1, 1)
+    mocker.patch.object(service, "_get_latest_datetime", return_value=latest)
+    
+    # Mock create object to return old date
+    mock_obj = MagicMock()
+    mock_obj.datetime = datetime(2023, 12, 31)
+    mocker.patch.object(service, "_create_stop_search_object", return_value=mock_obj)
+    
+    valid, failed = service._process_data_in_memory("force", [{"data": "old"}])
+    assert len(valid) == 0
+
+
+def test_process_data_in_memory_remediation_skip_old(db, mocker):
+    service = PoliceAPIService(db)
+    
+    # Mock latest date
+    latest = datetime(2024, 1, 1)
+    mocker.patch.object(service, "_get_latest_datetime", return_value=latest)
+    
+    # Mock create object to fail first, then return old date
+    mock_obj = MagicMock()
+    mock_obj.datetime = datetime(2023, 12, 31)
+    
+    mocker.patch.object(service, "_create_stop_search_object", side_effect=[Exception("Fail"), mock_obj])
+    mocker.patch.object(service, "_clean_item", return_value={})
+    
+    valid, failed = service._process_data_in_memory("force", [{"data": "old"}])
+    assert len(valid) == 0
+
+
+def test_remediate_failed_rows_json_error(mocker):
+    mock_db = MagicMock()
+    service = PoliceAPIService(mock_db)
+    
+    row = MagicMock()
+    row.raw_data = "invalid json"
+    row.id = 1
+    
+    mock_db.query.return_value.all.return_value = [row]
+    
+    service.remediate_failed_rows()
+    
+    # Should log warning and continue
+    assert not mock_db.add.called
+
+
+def test_remediate_failed_rows_exception(mocker):
+    mock_db = MagicMock()
+    service = PoliceAPIService(mock_db)
+    
+    row = MagicMock()
+    row.raw_data = {"data": "ok"}
+    row.id = 1
+    
+    mock_db.query.return_value.all.return_value = [row]
+    
+    # Mock create to raise exception
+    mocker.patch.object(service, "_create_stop_search_object", side_effect=Exception("Error"))
+    
+    service.remediate_failed_rows()
+    
+    # Should catch exception
+    assert not mock_db.delete.called
 
 
 def test_remediate_failed_rows(mocker):

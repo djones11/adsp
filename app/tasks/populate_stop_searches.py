@@ -18,19 +18,61 @@ POLICE_FORCES = os.getenv("POLICE_FORCES", '["leicestershire"]')
 
 @celery_app.task(bind=True, max_retries=5)
 def fetch_force_task(
-    self, force: str, date: Optional[str] = None
+    self, force: str, target_date: Optional[str] = None
 ) -> Optional[Tuple[str, str]]:
     """
     Fetches data for a single force and writes to temp CSVs.
+    Handles backfill by checking available dates and latest DB record.
     Returns paths to (valid_csv, failed_csv).
     If the task fails after retries, it returns None to allow the chord to continue.
     """
-    logger.info(f"Starting fetch task for {force}")
+    logger.info(f"Starting fetch task for {force} (target_date={target_date})")
     db = SessionLocal()
 
     try:
         service = PoliceAPIService(db)
-        valid_objects, failed_rows = service.fetch_and_process_force(force, date)
+
+        # 1. Get available dates for this force
+        availability = service.get_available_dates()
+        available_dates = availability.get(force, [])
+
+        if not available_dates:
+            logger.warning(f"No available dates found for force: {force}")
+            return None
+
+        # 2. Get latest date from DB
+        latest_datetime = service.get_latest_date(force)
+        latest_date_str = latest_datetime.strftime("%Y-%m") if latest_datetime else None
+
+        logger.info(f"Latest date in DB for {force}: {latest_date_str}")
+
+        # 3. Filter dates to fetch
+        dates_to_fetch = []
+        for date in available_dates:
+            # If we have a target date, skip dates after it
+            if target_date and date > target_date:
+                continue
+
+            # If we have data in DB, skip dates before or equal to latest
+            if latest_date_str and date <= latest_date_str:
+                continue
+
+            dates_to_fetch.append(date)
+
+        if not dates_to_fetch:
+            logger.info(f"No new dates to fetch for {force}")
+            return None
+
+        logger.info(f"Fetching dates for {force}: {dates_to_fetch}")
+
+        all_valid_objects = []
+        all_failed_rows = []
+
+        # 4. Fetch data for each date
+        for date in dates_to_fetch:
+            valid_objects, failed_rows = service.fetch_and_process_force(force, date)
+            all_valid_objects.extend(valid_objects)
+            all_failed_rows.extend(failed_rows)
 
         # Write valid objects to CSV
         valid_csv_path = f"/tmp/valid_{force}.csv"
@@ -63,8 +105,8 @@ def fetch_force_task(
                     "outcome_object_name",
                 ]
             )
-            
-            for obj in valid_objects:
+
+            for obj in all_valid_objects:
                 writer.writerow(
                     [
                         obj.force,
@@ -99,7 +141,7 @@ def fetch_force_task(
             writer = csv.writer(f)
             writer.writerow(["raw_data", "reason"])
 
-            for row in failed_rows:
+            for row in all_failed_rows:
                 writer.writerow([json.dumps(row["raw_data"]), row["reason"]])
 
         return valid_csv_path, failed_csv_path
@@ -111,7 +153,7 @@ def fetch_force_task(
         # when run in a chord causing the whole chord to fail.
         try:
             # Exponential backoff: 2^retries (1s, 2s, 4s, 8s, 16s)
-            retry_delay = 2 ** self.request.retries
+            retry_delay = 2**self.request.retries
             self.retry(exc=e, countdown=retry_delay)
         except MaxRetriesExceededError:
             logger.error(
@@ -193,9 +235,9 @@ def insert_data_task(self, results: List[Optional[Tuple[str, str]]]):
         with open(final_valid_csv, "r") as f:
             line_count = sum(1 for line in f) - 1  # Exclude header
 
-            if (line_count > 0):  
+            if line_count > 0:
                 service.bulk_insert_from_csv(final_valid_csv)
-            else :
+            else:
                 logger.info("No new valid rows to insert.")
 
         # Handle failed rows (Standard insert for now as FailedRow structure is simple)
@@ -231,9 +273,6 @@ def insert_data_task(self, results: List[Optional[Tuple[str, str]]]):
         if os.path.exists(final_valid_csv):
             os.remove(final_valid_csv)
 
-        if os.path.exists(final_failed_csv):
-            os.remove(final_failed_csv)
-
     except Exception as e:
         logger.error(f"Error in bulk insert task: {e}")
         raise
@@ -247,13 +286,19 @@ def populate_stop_searches(date: Optional[str] = None):
     Task scheduled to run at a scheduled time daily.
     Fetches Stop and Search data from the Police API.
     and populates the database.
+
+    Args:
+        date: Optional upper bound date (YYYY-MM). If provided, data will be fetched
+              up to this date. If not provided, data will be fetched up to the latest
+              available date.
     """
-    logger.info(f"Starting populate stop searches task for date: {date}")
+    logger.info(f"Starting populate stop searches task (target_date={date})")
 
     try:
         police_forces = json.loads(POLICE_FORCES)
 
         # Create a group of tasks for each force
+        # We pass the target date (upper bound) to each task
         header = group(fetch_force_task.s(force, date) for force in police_forces)
 
         # Chain with the insert task

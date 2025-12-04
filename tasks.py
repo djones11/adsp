@@ -100,7 +100,7 @@ def trigger_populate_stop_searches(c: Context, date: Optional[str] = None) -> No
 
     if date:
         cmd += f" --date {date}"
-    
+
     subprocess.run(
         cmd,
         shell=True,
@@ -122,7 +122,12 @@ def remediate_failed_rows(c: Context) -> None:
 # --- Docker Tasks ---
 
 
-@task(help={"build": "Build images before starting", "local": "Enable hot reload for worker"})
+@task(
+    help={
+        "build": "Build images before starting",
+        "local": "Enable hot reload for worker",
+    }
+)
 def up(c: Context, build: bool = False, local: bool = False) -> None:
     """Start all services in detached mode. Use --build to force rebuild. Use --local for hot reload."""
     print("Starting services...")
@@ -240,7 +245,9 @@ def run_sql(c: Context, command: str) -> None:
 
 
 @task(help={"service": "Service name to filter logs (e.g. web, worker)"})
-def view(c: Context, service: Optional[Service] = None, tail: Optional[int] = None) -> None:
+def view(
+    c: Context, service: Optional[Service] = None, tail: Optional[int] = None
+) -> None:
     """Follow logs for all services or a specific service."""
     if not validate_service(service):
         return
@@ -276,13 +283,13 @@ def export(
     """Export logs to a file."""
     if not validate_service(service):
         return
-    
+
     print(f"Exporting logs to {output}...")
     cmd = "docker compose logs"
 
     if since:
         cmd += f" --since {since}"
-        
+
     if until:
         cmd += f" --until {until}"
 

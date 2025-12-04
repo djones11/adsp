@@ -18,7 +18,9 @@ def main():
     args = parser.parse_args()
 
     try:
-        logger.info(f"Triggering populate stop searches job via Celery (date={args.date})...")
+        logger.info(
+            f"Triggering populate stop searches job via Celery (date={args.date})..."
+        )
         # Trigger the task asynchronously
         populate_stop_searches.delay(date=args.date)
         logger.info(
