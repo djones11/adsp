@@ -11,6 +11,7 @@ from prometheus_client import Counter, Summary
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.failed_row import FailedRow
 from app.models.stop_search import StopSearch
 from app.schemas.stop_search import StopSearchCreate
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://data.police.uk/api/stops-force"
 AVAILABILITY_URL = "https://data.police.uk/api/crimes-street-dates"
-POLICE_FORCES = os.getenv("POLICE_FORCES", '["leicestershire"]')
+POLICE_FORCES = settings.POLICE_FORCES
 
 # Metrics
 PROCESSING_TIME = Summary(
@@ -277,7 +278,7 @@ class PoliceAPIService:
         longitude = None
         street_id = None
         street_name = None
-        
+
         if schema_item.location:
             latitude = schema_item.location.latitude
             longitude = schema_item.location.longitude
@@ -288,7 +289,7 @@ class PoliceAPIService:
         # Extract outcome object details
         outcome_object_id = None
         outcome_object_name = None
-        
+
         if schema_item.outcome_object:
             outcome_object_id = schema_item.outcome_object.id
             outcome_object_name = schema_item.outcome_object.name

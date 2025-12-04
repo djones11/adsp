@@ -15,7 +15,8 @@ dependencies = [
     "redis>=4.6.0",
     "requests>=2.31.0",
     "prometheus-client>=0.17.0",
-    "prometheus-fastapi-instrumentator>=7.0.0"
+    "prometheus-fastapi-instrumentator>=7.0.0",
+    "pydantic-settings>=2.0.0"
 ]
 
 [project.optional-dependencies]

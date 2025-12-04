@@ -27,12 +27,14 @@ def test_start_prometheus_server(mock_registry, mock_multiprocess, mock_start_se
 def test_multiproc_dir_creation(mock_makedirs, mock_exists):
     # Test when dir does not exist
     mock_exists.return_value = False
-    
+
     # We need to reload the module to trigger the top-level code
     import importlib
+
     import app.core.celery_app
+
     importlib.reload(app.core.celery_app)
-    
+
     mock_makedirs.assert_called()
 
 

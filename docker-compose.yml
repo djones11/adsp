@@ -29,6 +29,35 @@ services:
     ports:
       - "${REDIS_PORT}:6379"
 
+  redis-exporter:
+    image: oliver006/redis_exporter
+    environment:
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      - redis
+    ports:
+      - "9121:9121"
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter
+    environment:
+      - DATA_SOURCE_NAME=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+    depends_on:
+      - db
+    ports:
+      - "9187:9187"
+
+  rabbitmq-exporter:
+    image: kbudde/rabbitmq-exporter
+    environment:
+      - RABBIT_URL=http://rabbitmq:15672
+      - RABBIT_USER=${RABBITMQ_DEFAULT_USER}
+      - RABBIT_PASSWORD=${RABBITMQ_DEFAULT_PASS}
+    depends_on:
+      - rabbitmq
+    ports:
+      - "9419:9419"
+
   web:
     build:
       context: .
@@ -103,6 +132,25 @@ services:
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    container_name: cadvisor
+    privileged: true
+    ports:
+      - "8080:8080"
+    command:
+      - "-docker_only=true"
+      - "-housekeeping_interval=10s"
+      - "-disable_metrics=disk,diskIO,network,tcp,udp,percpu,sched,process"
+      - "-store_container_labels=true"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - redis
 
 volumes:
   postgres_data:

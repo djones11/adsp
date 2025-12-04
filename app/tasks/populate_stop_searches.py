@@ -8,12 +8,13 @@ from celery import chord, group  # type: ignore
 from celery.exceptions import MaxRetriesExceededError
 
 from app.core.celery_app import celery_app
+from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.failed_row import FailedRow
 from app.services.police_api import PoliceAPIService
 
 logger = logging.getLogger(__name__)
-POLICE_FORCES = os.getenv("POLICE_FORCES", '["leicestershire"]')
+POLICE_FORCES = settings.POLICE_FORCES
 
 
 @celery_app.task(bind=True, max_retries=5)
@@ -295,7 +296,7 @@ def populate_stop_searches(date: Optional[str] = None):
     logger.info(f"Starting populate stop searches task (target_date={date})")
 
     try:
-        police_forces = json.loads(POLICE_FORCES)
+        police_forces = POLICE_FORCES
 
         # Create a group of tasks for each force
         # We pass the target date (upper bound) to each task

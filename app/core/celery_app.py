@@ -5,22 +5,16 @@ from celery.schedules import crontab  # type: ignore
 from celery.signals import worker_process_init, worker_ready  # type: ignore
 from prometheus_client import CollectorRegistry, multiprocess, start_http_server
 
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "amqp://guest:guest@rabbitmq:5672//")
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
-WORKER_PORT = os.getenv("WORKER_PORT", "8001")
-POLL_HOUR = int(os.getenv("POLL_HOUR", "2"))
-PROMETHEUS_MULTIPROC_DIR = os.getenv(
-    "PROMETHEUS_MULTIPROC_DIR", "/tmp/prometheus_multiproc"
-)
+from app.core.config import settings
 
 # Ensure multiproc dir exists
-if not os.path.exists(PROMETHEUS_MULTIPROC_DIR):
-    os.makedirs(PROMETHEUS_MULTIPROC_DIR, exist_ok=True)
+if not os.path.exists(settings.PROMETHEUS_MULTIPROC_DIR):
+    os.makedirs(settings.PROMETHEUS_MULTIPROC_DIR, exist_ok=True)
 
 celery_app = Celery(
     "worker",
-    broker=CELERY_BROKER_URL,
-    backend=CELERY_RESULT_BACKEND,
+    broker=settings.CELERY_BROKER_URL,
+    backend=settings.CELERY_RESULT_BACKEND,
     include=["app.tasks.populate_stop_searches"],
 )
 
@@ -31,7 +25,7 @@ celery_app.conf.task_routes = {"app.tasks.*": "main-queue"}
 def start_prometheus_server(sender, **kwargs):
     registry = CollectorRegistry()
     multiprocess.MultiProcessCollector(registry)
-    start_http_server(int(WORKER_PORT), registry=registry)
+    start_http_server(settings.WORKER_PORT, registry=registry)
 
 
 @worker_process_init.connect
@@ -47,7 +41,7 @@ def init_worker_process(*args, **kwargs):
 celery_app.conf.beat_schedule = {
     "daily-processing-task": {
         "task": "app.tasks.populate_stop_searches.populate_stop_searches",
-        "schedule": crontab(hour=POLL_HOUR, minute=0),
+        "schedule": crontab(hour=settings.POLL_HOUR, minute=0),
     },
 }
 

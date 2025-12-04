@@ -1,7 +1,7 @@
 from datetime import datetime as dt_type
 from typing import Generic, List, Optional, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 T = TypeVar("T")
 
@@ -49,8 +49,7 @@ class StopSearch(StopSearchBase):
     id: int
     force: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PaginatedResponse(BaseModel, Generic[T]):

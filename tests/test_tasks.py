@@ -119,9 +119,9 @@ def test_fetch_force_task_no_dates(mock_session_cls, mock_service_cls):
     mock_session_cls.return_value = mock_session
     mock_service = MagicMock()
     mock_service_cls.return_value = mock_service
-    
+
     mock_service.get_available_dates.return_value = {}
-    
+
     result = fetch_force_task("force")  # type: ignore
     assert result is None
 
@@ -133,13 +133,14 @@ def test_fetch_force_task_no_new_dates(mock_session_cls, mock_service_cls):
     mock_session_cls.return_value = mock_session
     mock_service = MagicMock()
     mock_service_cls.return_value = mock_service
-    
+
     mock_service.get_available_dates.return_value = {"force": ["2023-01"]}
-    
+
     # Mock latest date to be same as available
     from datetime import datetime
+
     mock_service.get_latest_date.return_value = datetime(2023, 1, 1)
-    
+
     result = fetch_force_task("force")  # type: ignore
     assert result is None
 
@@ -151,10 +152,10 @@ def test_fetch_force_task_target_date_skip(mock_session_cls, mock_service_cls):
     mock_session_cls.return_value = mock_session
     mock_service = MagicMock()
     mock_service_cls.return_value = mock_service
-    
+
     mock_service.get_available_dates.return_value = {"force": ["2023-02"]}
     mock_service.get_latest_date.return_value = None
-    
+
     # Target date before available date
     result = fetch_force_task("force", target_date="2023-01")  # type: ignore
     assert result is None

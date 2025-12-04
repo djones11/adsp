@@ -17,12 +17,6 @@ def test_health_check(client):
 
 
 def test_get_stop_searches(client, db, mocker):
-    # Mock SessionLocal to return the test db session
-    mock_session = MagicMock()
-    mock_session.__enter__.return_value = db
-    mock_session.__exit__.return_value = None
-    mocker.patch("app.main.SessionLocal", return_value=mock_session)
-
     # Seed data
     item1 = StopSearch(
         force="leicestershire",

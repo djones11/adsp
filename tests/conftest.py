@@ -14,7 +14,8 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
-from app.main import app, get_db
+from app.db.session import get_db
+from app.main import app
 
 
 @compiles(JSONB, "sqlite")
