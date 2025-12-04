@@ -1,0 +1,5 @@
+services:
+  worker:
+    command: watchfiles "celery -A app.core.celery_app worker --loglevel=info -Q main-queue" app
+    environment:
+      - WATCHFILES_FORCE_POLLING=true
