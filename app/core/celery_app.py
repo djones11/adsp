@@ -3,7 +3,12 @@ import os
 from celery import Celery  # type: ignore
 from celery.schedules import crontab  # type: ignore
 from celery.signals import worker_process_init, worker_ready  # type: ignore
-from prometheus_client import CollectorRegistry, multiprocess, start_http_server
+from prometheus_client import (
+    CollectorRegistry,
+    ProcessCollector,
+    multiprocess,
+    start_http_server,
+)
 
 from app.core.config import settings
 
@@ -25,6 +30,7 @@ celery_app.conf.task_routes = {"app.tasks.*": "main-queue"}
 def start_prometheus_server(sender, **kwargs):
     registry = CollectorRegistry()
     multiprocess.MultiProcessCollector(registry)
+    ProcessCollector(registry=registry)
     start_http_server(settings.WORKER_PORT, registry=registry)
 
 
