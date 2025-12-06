@@ -2,13 +2,11 @@ import logging
 import os
 import sys
 
-# Add the parent directory to sys.path to allow imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db.session import SessionLocal
 from app.services.police_api import PoliceAPIService
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

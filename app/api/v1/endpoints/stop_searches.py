@@ -4,7 +4,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.db.session import SessionLocal, get_db
+from app.db.session import get_db
+from app.core.config import AVAILABLE_FORCES
 from app.models.stop_search import StopSearch
 from app.schemas.stop_search import PaginatedResponse
 from app.schemas.stop_search import StopSearch as StopSearchSchema
@@ -21,7 +22,7 @@ def get_stop_searches(
     date_end: Optional[date] = Query(
         None, description="Filter by end date (inclusive)"
     ),
-    force: Optional[str] = Query(None, description="Filter by police force"),
+    force: Optional[AVAILABLE_FORCES] = Query(None, description="Filter by police force"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=1000, description="Items per page"),
 ):

@@ -1,9 +1,10 @@
 from unittest.mock import MagicMock, patch
+import pytest
 
 from celery.exceptions import MaxRetriesExceededError
 
 from app.tasks.populate_stop_searches import (
-    fetch_force_task,
+    fetch_stop_search_task,
     insert_data_task,
     populate_stop_searches,
 )
@@ -17,28 +18,19 @@ def test_fetch_force_task_success(mock_session_cls, mock_service_cls):
     mock_service = MagicMock()
     mock_service_cls.return_value = mock_service
 
-    # Mock availability
-    mock_service.get_available_dates.return_value = {"leicestershire": ["2023-01"]}
-    mock_service.get_latest_date.return_value = None
-
-    # Mock return value of fetch_and_process_force
-    mock_obj = MagicMock()
-    mock_obj.force = "leicestershire"
-    mock_obj.type = "Person search"
-
-    mock_service.fetch_and_process_force.return_value = (
-        [mock_obj],
-        [{"raw_data": {}, "reason": "error"}],
+    # Mock fetch_and_dump_to_csv
+    mock_service.fetch_and_dump_to_csv.return_value = (
+        "/tmp/valid_leicestershire.csv",
+        "/tmp/failed_leicestershire.csv",
     )
 
-    with patch("builtins.open", new_callable=MagicMock):
-        # Call the task directly
-        result = fetch_force_task("leicestershire")  # type: ignore
+    # Call the task directly
+    result = fetch_stop_search_task("leicestershire")  # type: ignore
 
-        assert result is not None
-        valid_path, failed_path = result
-        assert valid_path == "/tmp/valid_leicestershire.csv"
-        assert failed_path == "/tmp/failed_leicestershire.csv"
+    assert result is not None
+    valid_path, failed_path = result
+    assert valid_path == "/tmp/valid_leicestershire.csv"
+    assert failed_path == "/tmp/failed_leicestershire.csv"
 
 
 @patch("app.tasks.populate_stop_searches.PoliceAPIService")
@@ -50,7 +42,7 @@ def test_fetch_force_task_failure_max_retries(mock_session_cls, mock_service_cls
     mock_service_cls.return_value = mock_service
 
     # Simulate exception
-    mock_service.fetch_and_process_force.side_effect = Exception("API Error")
+    mock_service.fetch_and_dump_to_csv.side_effect = Exception("API Error")
 
     # We need to mock the task instance 'self' to handle retry
     # When calling the decorated task directly, Celery 4+ doesn't pass self automatically
@@ -59,8 +51,8 @@ def test_fetch_force_task_failure_max_retries(mock_session_cls, mock_service_cls
     # But accessing the underlying function of a decorated task can be tricky (task.run usually).
 
     # Let's use patch.object on the task's retry method.
-    with patch.object(fetch_force_task, "retry", side_effect=MaxRetriesExceededError):
-        result = fetch_force_task("leicestershire")  # type: ignore
+    with patch.object(fetch_stop_search_task, "retry", side_effect=MaxRetriesExceededError):
+        result = fetch_stop_search_task("leicestershire")  # type: ignore
         assert result is None
 
 
@@ -120,9 +112,9 @@ def test_fetch_force_task_no_dates(mock_session_cls, mock_service_cls):
     mock_service = MagicMock()
     mock_service_cls.return_value = mock_service
 
-    mock_service.get_available_dates.return_value = {}
+    mock_service.fetch_and_dump_to_csv.return_value = None
 
-    result = fetch_force_task("force")  # type: ignore
+    result = fetch_stop_search_task("force")  # type: ignore
     assert result is None
 
 
@@ -134,30 +126,9 @@ def test_fetch_force_task_no_new_dates(mock_session_cls, mock_service_cls):
     mock_service = MagicMock()
     mock_service_cls.return_value = mock_service
 
-    mock_service.get_available_dates.return_value = {"force": ["2023-01"]}
+    mock_service.fetch_and_dump_to_csv.return_value = None
 
-    # Mock latest date to be same as available
-    from datetime import datetime
-
-    mock_service.get_latest_date.return_value = datetime(2023, 1, 1)
-
-    result = fetch_force_task("force")  # type: ignore
-    assert result is None
-
-
-@patch("app.tasks.populate_stop_searches.PoliceAPIService")
-@patch("app.tasks.populate_stop_searches.SessionLocal")
-def test_fetch_force_task_target_date_skip(mock_session_cls, mock_service_cls):
-    mock_session = MagicMock()
-    mock_session_cls.return_value = mock_session
-    mock_service = MagicMock()
-    mock_service_cls.return_value = mock_service
-
-    mock_service.get_available_dates.return_value = {"force": ["2023-02"]}
-    mock_service.get_latest_date.return_value = None
-
-    # Target date before available date
-    result = fetch_force_task("force", target_date="2023-01")  # type: ignore
+    result = fetch_stop_search_task("force")  # type: ignore
     assert result is None
 
 
@@ -203,3 +174,122 @@ def test_insert_data_task_exception(mock_session_cls, mock_service_cls):
                             pass  # Expected
 
                         # assert mock_service.bulk_insert_from_csv.called
+
+
+# --- Tests moved from test_coverage_gaps.py ---
+
+def test_fetch_data_for_force_exception_retry():
+    """Test fetch_data_for_force retrying on exception."""
+    # Mock the task instance
+    mock_self = MagicMock()
+    mock_self.request.retries = 0
+    # mock_self.retry.side_effect = Exception("Retry Triggered")
+
+    mock_db_session = MagicMock()
+
+    with patch(
+        "app.tasks.populate_stop_searches.SessionLocal",
+        return_value=mock_db_session,
+    ):
+        with patch(
+            "app.tasks.populate_stop_searches.PoliceAPIService"
+        ) as MockService:
+            MockService.return_value.fetch_and_dump_to_csv.side_effect = Exception(
+                "API Error"
+            )
+
+            # It should return None if retry doesn't raise (simulating retry scheduled)
+            # But in reality retry raises. We just want to verify it was called.
+            func = fetch_stop_search_task.__wrapped__
+            if hasattr(func, "__func__"):
+                func = func.__func__
+            
+            func(mock_self, "force1")
+
+    mock_self.retry.assert_called()
+
+
+def test_fetch_force_task_max_retries_internal():
+    """Test fetch_force_task handling MaxRetriesExceededError."""
+    mock_db_session = MagicMock()
+    mock_self = MagicMock()
+    mock_self.request.retries = 5
+    mock_self.retry.side_effect = MaxRetriesExceededError()
+
+    with patch(
+        "app.tasks.populate_stop_searches.SessionLocal", return_value=mock_db_session
+    ):
+        with patch("app.tasks.populate_stop_searches.PoliceAPIService") as MockService:
+            # Simulate exception in fetch_and_dump_to_csv
+            MockService.return_value.fetch_and_dump_to_csv.side_effect = Exception(
+                "API Error"
+            )
+
+            # This should catch API Error, call retry (which raises MaxRetriesExceededError),
+            # catch MaxRetriesExceededError, print message, and return None.
+
+            # fetch_force_task is a PromiseProxy. __wrapped__ seems to be a bound method.
+            # We need the unbound function to pass our mock_self.
+            func = fetch_stop_search_task.__wrapped__
+            if hasattr(func, "__func__"):
+                func = func.__func__
+
+            func(mock_self, "force1")
+
+    mock_self.retry.assert_called()
+
+
+def test_insert_data_task_no_valid_rows():
+    """Test insert_data_task when there are no valid rows to insert."""
+    mock_self = MagicMock()
+    mock_db_session = MagicMock()
+
+    # Create a dummy empty CSV
+    with open("/tmp/test_empty.csv", "w") as f:
+        f.write("header\\n")
+
+    results = [("/tmp/test_empty.csv", "/tmp/test_empty_failed.csv")]
+
+    with patch(
+        "app.tasks.populate_stop_searches.SessionLocal", return_value=mock_db_session
+    ):
+        with patch("app.tasks.populate_stop_searches.PoliceAPIService") as MockService:
+            with patch("app.tasks.populate_stop_searches.logger") as mock_logger:
+                # Mock bulk_insert_from_csv to ensure it's NOT called
+                mock_service_instance = MockService.return_value
+
+                # Access the original function (might need double unwrap due to autoretry)
+                func = insert_data_task.__wrapped__
+                if hasattr(func, "__wrapped__"):
+                    func = func.__wrapped__
+
+                # Try calling without self if it's somehow bound, or maybe it expects self
+                # If "3 were given", it means self is passed twice.
+                # Let's try passing ONLY results.
+                try:
+                    func(results)
+                except TypeError:
+                    # Fallback if it was actually unbound
+                    func(mock_self, results)
+
+                mock_service_instance.bulk_insert_from_csv.assert_not_called()
+                mock_logger.info.assert_any_call("No new valid rows to insert.")
+
+
+def test_insert_data_task_session_exception():
+    """Test insert_data_task raising an exception."""
+    mock_self = MagicMock()
+
+    with patch(
+        "app.tasks.populate_stop_searches.SessionLocal",
+        side_effect=Exception("DB Error"),
+    ):
+        with pytest.raises(Exception, match="DB Error"):
+            func = insert_data_task.__wrapped__
+            if hasattr(func, "__wrapped__"):
+                func = func.__wrapped__
+            try:
+                func([])
+            except TypeError:
+                func(mock_self, [])
+

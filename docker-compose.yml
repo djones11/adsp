@@ -76,8 +76,8 @@ services:
         condition: service_started
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      - CELERY_BROKER_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672//
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_BROKER_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:${RABBITMQ_PORT}//
+      - CELERY_RESULT_BACKEND=redis://redis:${REDIS_PORT}/0
 
   worker:
     build:
@@ -94,8 +94,8 @@ services:
       - redis
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      - CELERY_BROKER_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672//
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_BROKER_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:${RABBITMQ_PORT}//
+      - CELERY_RESULT_BACKEND=redis://redis:${REDIS_PORT}/0
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
 
   beat:
@@ -111,8 +111,8 @@ services:
       - redis
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      - CELERY_BROKER_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672//
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_BROKER_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:${RABBITMQ_PORT}//
+      - CELERY_RESULT_BACKEND=redis://redis:${REDIS_PORT}/0
 
   prometheus:
     image: prom/prometheus
@@ -136,7 +136,7 @@ services:
   loki:
     image: grafana/loki:3.0.0
     ports:
-      - "3100:3100"
+      - "${LOKI_PORT}:3100"
     command: -config.file=/etc/loki/local-config.yaml
     volumes:
       - ./docker/loki/loki-config.yaml:/etc/loki/local-config.yaml
@@ -149,25 +149,6 @@ services:
     command: -config.file=/etc/promtail/config.yml
     depends_on:
       - loki
-
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.47.0
-    container_name: cadvisor
-    privileged: true
-    ports:
-      - "8080:8080"
-    command:
-      - "-docker_only=true"
-      - "-housekeeping_interval=10s"
-      - "-disable_metrics=disk,diskIO,network,tcp,udp,percpu,sched,process"
-      - "-store_container_labels=true"
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    depends_on:
-      - redis
 
 volumes:
   postgres_data:

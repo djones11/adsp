@@ -3,12 +3,50 @@ from typing import Any, List, Literal, Optional, Union
 from pydantic import PostgresDsn, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+AVAILABLE_FORCES = Literal[
+    "avon-and-somerset",
+    "btp",
+    "cambridgeshire",
+    "cheshire",
+    "city-of-london",
+    "cleveland",
+    "cumbria",
+    "derbyshire",
+    "devon-and-cornwall",
+    "dorset",
+    "durham",
+    "essex",
+    "gloucestershire",
+    "hampshire",
+    "hertfordshire",
+    "kent",
+    "lancashire",
+    "leicestershire",
+    "merseyside",
+    "metropolitan",
+    "norfolk",
+    "north-wales",
+    "northamptonshire",
+    "northumbria",
+    "nottinghamshire",
+    "south-wales",
+    "south-yorkshire",
+    "staffordshire",
+    "suffolk",
+    "surrey",
+    "sussex",
+    "thames-valley",
+    "warwickshire",
+    "west-mercia",
+    "west-midlands",
+    "west-yorkshire",
+]
 
 # Populate from .env file
 class Settings(BaseSettings):
     PROJECT_NAME: str = "ADSP Project"
     PROJECT_VERSION: str = "0.1.0"
-    API_V1_STR: str = "/v1"
+    V1_STR: str = "/v1"
 
     POSTGRES_SERVER: str = "db"
     POSTGRES_USER: str = "postgres"
@@ -46,46 +84,7 @@ class Settings(BaseSettings):
     WORKER_PORT: int = 8001
     POLL_HOUR: int = 2
     PROMETHEUS_MULTIPROC_DIR: str = "/tmp/prometheus_multiproc"
-    POLICE_FORCES: List[
-        Literal[
-            "avon-and-somerset",
-            "btp",
-            "cambridgeshire",
-            "cheshire",
-            "city-of-london",
-            "cleveland",
-            "cumbria",
-            "derbyshire",
-            "devon-and-cornwall",
-            "dorset",
-            "durham",
-            "essex",
-            "gloucestershire",
-            "hampshire",
-            "hertfordshire",
-            "kent",
-            "lancashire",
-            "leicestershire",
-            "merseyside",
-            "metropolitan",
-            "norfolk",
-            "north-wales",
-            "northamptonshire",
-            "northumbria",
-            "nottinghamshire",
-            "south-wales",
-            "south-yorkshire",
-            "staffordshire",
-            "suffolk",
-            "surrey",
-            "sussex",
-            "thames-valley",
-            "warwickshire",
-            "west-mercia",
-            "west-midlands",
-            "west-yorkshire",
-        ]
-    ] = ["metropolitan"]
+    POLICE_FORCES: List[AVAILABLE_FORCES] = ["metropolitan"]
 
     model_config = SettingsConfigDict(
         case_sensitive=True, env_file=".env", extra="ignore"

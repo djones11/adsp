@@ -1,9 +1,12 @@
 from datetime import datetime as dt_type
 from typing import Generic, List, Optional, TypeVar
 
+from app.core.config import AVAILABLE_FORCES
 from pydantic import BaseModel, ConfigDict
 
 T = TypeVar("T")
+
+# Expected schemas for StopSearch data coming from the police API
 
 
 class OutcomeObject(BaseModel):
@@ -40,14 +43,9 @@ class StopSearchBase(BaseModel):
     removal_of_more_than_outer_clothing: Optional[bool] = None
     outcome_object: Optional[OutcomeObject] = None
 
-
-class StopSearchCreate(StopSearchBase):
-    pass
-
-
 class StopSearch(StopSearchBase):
     id: int
-    force: str
+    force: AVAILABLE_FORCES
 
     model_config = ConfigDict(from_attributes=True)
 

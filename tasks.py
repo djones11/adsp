@@ -1,10 +1,11 @@
 import os
+import socket
 import subprocess
 import sys
 import webbrowser
 from typing import Literal, Optional, cast, get_args
 
-import httpx
+import requests
 from dotenv import load_dotenv
 from invoke.collection import Collection
 from invoke.context import Context
@@ -16,10 +17,14 @@ load_dotenv()
 WEB_PORT = os.getenv("WEB_PORT", "8000")
 PROMETHEUS_PORT = os.getenv("PROMETHEUS_PORT", "9090")
 GRAFANA_PORT = os.getenv("GRAFANA_PORT", "3000")
+REDIS_PORT = os.getenv("REDIS_PORT", "6379")
+RABBITMQ_PORT = os.getenv("RABBITMQ_PORT", "5672")
+RABBITMQ_UI_PORT = os.getenv("RABBITMQ_UI_PORT", "15672")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_DB = os.getenv("POSTGRES_DB", "adsp")
-
-WEB_ENDPOINT = f"http://localhost:{WEB_PORT}"
+LOKI_PORT = os.getenv("LOKI_PORT", "3100")
+CADVISOR_PORT = os.getenv("CADVISOR_PORT", "8080")
 
 # Define valid services
 Service = Literal[
@@ -37,6 +42,13 @@ def validate_service(service: Optional[str]) -> bool:
 
     return True
 
+def run(cmd: str, **kwargs) -> None:
+    """Helper function to run a shell command."""
+    result = subprocess.run(cmd, shell=True, **kwargs)
+
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
 
 # --- Root Tasks ---
 
@@ -53,20 +65,13 @@ def grafana(c: Context) -> None:
 def type_check(c: Context) -> None:
     """Run type checking with mypy."""
     print("Running type checking...")
-    result = subprocess.run("uv run mypy .", shell=True)
-    if result.returncode != 0:
-        sys.exit(result.returncode)
-
+    run("uv run mypy .")
 
 @task
 def lint(c: Context) -> None:
     """Run linting and type checking."""
     print("Running linting...")
-    result = subprocess.run("uv run ruff check .", shell=True)
-
-    if result.returncode != 0:
-        sys.exit(result.returncode)
-
+    run("uv run ruff check .")
     type_check(c)
 
 
@@ -74,8 +79,8 @@ def lint(c: Context) -> None:
 def format(c: Context) -> None:
     """Run formatting and import sorting."""
     print("Running formatting...")
-    subprocess.run("uv run ruff check --select I --fix .", shell=True, check=True)
-    subprocess.run("uv run ruff format .", shell=True, check=True)
+    run("uv run ruff check --select I --fix .")
+    run("uv run ruff format .")
 
 
 # --- Web Tasks ---
@@ -85,38 +90,21 @@ def format(c: Context) -> None:
 def test(c: Context) -> None:
     """Run tests inside the container."""
     print("Running tests...")
+    run("docker compose exec web pytest")
 
-    result = subprocess.run("docker compose exec web pytest", shell=True)
-
-    if result.returncode != 0:
-        sys.exit(result.returncode)
-
-
-@task(help={"date": "Date in YYYY-MM format"})
-def trigger_populate_stop_searches(c: Context, date: Optional[str] = None) -> None:
+@task
+def trigger_populate_stop_searches(c: Context,) -> None:
     """Manual trigger of the daily data population job via script."""
-    print(f"Manually triggering daily data population job (date={date})...")
+    print(f"Manually triggering daily data population job ...")
     cmd = "docker compose exec web python scripts/trigger_populate_stop_searches.py"
-
-    if date:
-        cmd += f" --date {date}"
-
-    subprocess.run(
-        cmd,
-        shell=True,
-        check=True,
-    )
+    run(cmd)
 
 
 @task
 def remediate_failed_rows(c: Context) -> None:
     """Manual trigger of the remediation job via script."""
     print("Manually triggering remediation...")
-    subprocess.run(
-        "docker compose exec web python scripts/trigger_remediation.py",
-        shell=True,
-        check=True,
-    )
+    run("docker compose exec web python scripts/trigger_remediation.py")
 
 
 # --- Docker Tasks ---
@@ -142,14 +130,14 @@ def up(c: Context, build: bool = False, local: bool = False) -> None:
     if build:
         cmd += " --build"
 
-    subprocess.run(cmd, shell=True, check=True)
+    run(cmd)
 
 
 @task
 def down(c: Context) -> None:
     """Stop all services."""
     print("Stopping services...")
-    subprocess.run("docker compose down", shell=True, check=True)
+    run("docker compose down")
 
 
 @task
@@ -157,20 +145,40 @@ def verify(c: Context) -> None:
     """Verify that all services are running and accessible."""
     print("Verifying endpoints...")
 
+    def check_tcp(host: str, port: int) -> bool:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                return True
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            return False
+
     endpoints = [
         ("API", f"http://localhost:{WEB_PORT}/health"),
-        ("Prometheus", f"http://localhost:{PROMETHEUS_PORT}"),
-        ("Grafana", f"http://localhost:{GRAFANA_PORT}"),
+        ("Prometheus", f"http://localhost:{PROMETHEUS_PORT}/-/healthy"),
+        ("Grafana", f"http://localhost:{GRAFANA_PORT}/api/health"),
+        ("Postgres", ("localhost", int(POSTGRES_PORT))),
+        ("RabbitMQ", f"http://localhost:{RABBITMQ_UI_PORT}"),
+        ("Redis", ("localhost", int(REDIS_PORT))),
+        ("Loki", f"http://localhost:{LOKI_PORT}/ready"),
     ]
 
-    for name, url in endpoints:
+    for name, target in endpoints:
         try:
-            response = httpx.get(url)
-            status_code = response.status_code
-            status = "✅ UP" if status_code < 400 else f"⚠️  Status {status_code}"
-            print(f"{name:<15} {url:<30} {status}")
+            if isinstance(target, tuple):
+                host, port = target
+                status = "✅ UP" if check_tcp(host, port) else "❌ DOWN"
+                url = f"tcp://{host}:{port}"
+            else:
+                url = target
+                response = requests.get(url, timeout=1)
+                status_code = response.status_code
+                status = "✅ UP" if status_code < 400 else f"⚠️  Status {status_code}"
+            
+            print(f"{name:<20} {url:<40} {status}")
         except Exception as e:
-            print(f"{name:<15} {url:<30} ❌ DOWN ({e})")
+            # Handle tuple unpacking for error message if target is tuple
+            url_str = f"tcp://{target[0]}:{target[1]}" if isinstance(target, tuple) else target
+            print(f"{name:<20} {url_str:<40} ❌ DOWN ({e})")
 
 
 # --- Database Tasks ---
@@ -180,50 +188,20 @@ def verify(c: Context) -> None:
 def migrate(c: Context) -> None:
     """Apply database migrations."""
     print("Applying migrations...")
-    subprocess.run(
-        "docker compose exec web alembic upgrade head", shell=True, check=True
-    )
+    run("docker compose exec web alembic upgrade head")
 
 
 @task(help={"message": "Migration message"})
 def make_migrations(c: Context, message: str = "New migration") -> None:
     """Create a new migration revision."""
     print(f"Creating migration: {message}")
-    subprocess.run(
-        f'docker compose exec web alembic revision --autogenerate -m "{message}"',
-        shell=True,
-        check=True,
-    )
-
-
-@task
-def init(c: Context) -> None:
-    """Load initial data into the database."""
-    print("Loading initial data...")
-    subprocess.run(
-        "docker compose exec web python scripts/initial_load.py data/sample_data.csv",
-        shell=True,
-        check=True,
-    )
-
+    run(f'docker compose exec web alembic revision --autogenerate -m "{message}"')
 
 @task
 def shell(c: Context) -> None:
     """Open a psql shell to the database."""
-    subprocess.run(
-        [
-            "docker",
-            "compose",
-            "exec",
-            "db",
-            "psql",
-            "-U",
-            POSTGRES_USER,
-            "-d",
-            POSTGRES_DB,
-        ]
-    )
-
+    print("Opening psql shell...")
+    run(f"docker compose exec db psql -U {POSTGRES_USER} -d {POSTGRES_DB}")
 
 @task(help={"command": "SQL command to execute"})
 def run_sql(c: Context, command: str) -> None:
@@ -235,10 +213,7 @@ def run_sql(c: Context, command: str) -> None:
         f'-d {POSTGRES_DB} -c "{escaped_command}"'
     )
 
-    result = subprocess.run(cmd, shell=True)
-
-    if result.returncode != 0:
-        sys.exit(result.returncode)
+    run(cmd)
 
 
 # --- Log Tasks ---
@@ -260,7 +235,7 @@ def view(
     if tail:
         cmd += f" --tail {tail}"
 
-    subprocess.run(cmd, shell=True, check=True)
+    run(cmd)
 
 
 @task(
@@ -297,7 +272,7 @@ def export(
         cmd += f" {service}"
 
     with open(output, "w") as f:
-        subprocess.run(cmd, shell=True, check=True, stdout=f)
+        run(cmd, stdout=f)
 
 
 # --- Collection Setup ---
@@ -328,7 +303,6 @@ ns.add_collection(docker_ns)
 db_ns = Collection("db")
 db_ns.add_task(cast(Task, migrate))
 db_ns.add_task(cast(Task, make_migrations))
-db_ns.add_task(cast(Task, init))
 db_ns.add_task(cast(Task, shell))
 db_ns.add_task(cast(Task, run_sql), name="run")
 
