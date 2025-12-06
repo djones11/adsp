@@ -1,8 +1,8 @@
 import os
 
-from celery import Celery  # type: ignore
-from celery.schedules import crontab  # type: ignore
-from celery.signals import worker_process_init, worker_ready  # type: ignore
+from celery import Celery
+from celery.schedules import crontab
+from celery.signals import worker_process_init, worker_ready
 from prometheus_client import (
     CollectorRegistry,
     ProcessCollector,
@@ -20,7 +20,7 @@ celery_app = Celery(
     "worker",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.populate_stop_searches"],
+    include=["app.tasks.stop_search_tasks"],
 )
 
 celery_app.conf.task_routes = {"app.tasks.*": "main-queue"}
@@ -36,18 +36,14 @@ def start_prometheus_server(sender, **kwargs):
 
 @worker_process_init.connect
 def init_worker_process(*args, **kwargs):
-    # This hook is called when a worker process is initialized.
-    # We don't need to do anything specific for prometheus_client here
-    # as it automatically detects the env var, but it's good practice
-    # to ensure the dir exists (done above).
     pass
 
 
 # Schedule: Run at the scheduled hour each day
 celery_app.conf.beat_schedule = {
     "daily-processing-task": {
-        "task": "app.tasks.populate_stop_searches.populate_stop_searches",
-        "schedule": crontab(hour=settings.POLL_HOUR, minute=0),
+        "task": "app.tasks.stop_search_tasks.ingest_stop_searches",
+        "schedule": crontab(hour=21, minute=33)# crontab(hour=settings.POLL_HOUR, minute=0),
     },
 }
 

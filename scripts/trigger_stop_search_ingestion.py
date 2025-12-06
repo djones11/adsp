@@ -4,22 +4,23 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.tasks.populate_stop_searches import populate_stop_searches
+from app.tasks.stop_search_tasks import ingest_stop_searches
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 def main():
     try:
         # Trigger the task asynchronously - runs in celery worker
-        populate_stop_searches.delay()
+        ingest_stop_searches.delay()
 
         logger.info(
-            "Populate stop searches job triggered. "
+            "Ingest stop searches job triggered. "
             'Use "invoke logs.view -s worker" to monitor progress.'
         )
     except Exception as e:
-        logger.error(f"Error triggering populate stop searches job: {e}")
+        logger.error(f"Error triggering ingest stop searches job: {e}")
         sys.exit(1)
 
 

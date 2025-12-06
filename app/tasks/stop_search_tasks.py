@@ -1,8 +1,10 @@
+import asyncio
 import logging
 import os
+import random
 from typing import List, Optional, Tuple
 
-from celery import chord, group 
+from celery import chord, group
 from celery.exceptions import MaxRetriesExceededError
 from sqlalchemy.orm import Session
 
@@ -10,27 +12,30 @@ from app.core.celery_app import celery_app
 from app.core.config import AVAILABLE_FORCES, settings
 from app.db.session import SessionLocal
 from app.services.csv_handler import CSVHandler
-from app.services.police_api import (
-    PoliceStopSearchService, 
+from app.services.stop_search_service import (
+    FAILED_ROW_COLUMNS,
     STOP_SEARCH_COLUMNS,
-    FAILED_ROW_COLUMNS
+    PoliceStopSearchService,
 )
 
 logger = logging.getLogger(__name__)
 
 POLICE_FORCES = settings.POLICE_FORCES
 
+
 def insert_rows(
-    db: Session, 
-    csv_paths: List[str],
-    columns: List[str]
+    db: Session, csv_paths: List[str], columns: List[str], table_name: str
 ) -> None:
     final_csv_path = "/tmp/final_path.csv"
 
+    if not csv_paths:
+        logger.info(f"No CSV paths to process for {table_name}.")
+        return
+
     CSVHandler.merge_csvs(
-        final_csv_path, 
-        csv_paths, 
-        columns, 
+        final_csv_path,
+        csv_paths,
+        columns,
     )
 
     # Check if we have data to insert
@@ -39,9 +44,16 @@ def insert_rows(
             line_count = sum(1 for line in f) - 1  # Exclude header
 
         if line_count > 0:
-            CSVHandler.bulk_insert_from_csv(db, final_csv_path, columns)
+            logger.info(f"Starting bulk insert of {line_count} rows into {table_name}.")
+            CSVHandler.bulk_insert_from_csv(db, final_csv_path, columns, table_name)
         else:
-            logger.info("No new valid rows to insert.")
+            logger.info(
+                f"No rows found in merged file for {table_name}. "
+                "Input files might have been empty or missing."
+            )
+    else:
+        logger.error(f"Failed to create merged CSV file at {final_csv_path}")
+
 
 @celery_app.task(bind=True, max_retries=5)
 def fetch_stop_search_task(self, force: AVAILABLE_FORCES) -> Optional[Tuple[str, str]]:
@@ -55,7 +67,7 @@ def fetch_stop_search_task(self, force: AVAILABLE_FORCES) -> Optional[Tuple[str,
 
     try:
         service = PoliceStopSearchService(db)
-        return service.download_stop_search_data(force)
+        return asyncio.run(service.download_stop_search_data(force))
 
     except Exception as e:
         logger.error(f"Error in fetch task for {force}: {e}")
@@ -63,9 +75,10 @@ def fetch_stop_search_task(self, force: AVAILABLE_FORCES) -> Optional[Tuple[str,
         # Manual retry implemented instead of autoretry_for to prevent an error
         # when run in a chord causing the whole chord to fail.
         try:
-            # Exponential backoff: 2^retries (1s, 2s, 4s, 8s, 16s)
-            retry_delay = 2**self.request.retries
+            # Exponential backoff: 2^retries (1s, 2s, 4s, 8s, 16s) with jitter
+            retry_delay = (2**self.request.retries) + random.uniform(0, 1)
             self.retry(exc=e, countdown=retry_delay)
+            return None
         except MaxRetriesExceededError:
             logger.error(
                 f"Max retries exceeded for {force}. "
@@ -92,8 +105,6 @@ def insert_data_task(self, results: List[Optional[Tuple[str, str]]]):
     db = SessionLocal()
 
     try:
-        service = PoliceStopSearchService(db)
-
         valid_csv_paths = []
         failed_csv_paths = []
 
@@ -107,8 +118,8 @@ def insert_data_task(self, results: List[Optional[Tuple[str, str]]]):
                 if failed_path:
                     failed_csv_paths.append(failed_path)
 
-        insert_rows(db, valid_csv_paths, STOP_SEARCH_COLUMNS)
-        insert_rows(db, failed_csv_paths, FAILED_ROW_COLUMNS)
+        insert_rows(db, valid_csv_paths, STOP_SEARCH_COLUMNS, "stop_searches")
+        insert_rows(db, failed_csv_paths, FAILED_ROW_COLUMNS, "failed_rows")
 
         logger.info("Bulk insert task completed successfully")
     except Exception as e:
@@ -119,7 +130,7 @@ def insert_data_task(self, results: List[Optional[Tuple[str, str]]]):
 
 
 @celery_app.task
-def populate_stop_searches():
+def ingest_stop_searches():
     """
     Task scheduled to run at a scheduled time daily.
     Fetches Stop and Search data from the Police API.

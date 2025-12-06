@@ -1,6 +1,8 @@
 from typing import Any, Dict
 
 
+# Currently aligned to only stop searches but could be extended to be more generic
+# and clean other data types as needed.
 class DataCleaner:
     @staticmethod
     def clean(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -17,16 +19,12 @@ class DataCleaner:
         """
         Fixes data types that don't match the schema or logic.
         """
-        # The API returns boolean false for 'outcome' when nothing was found,
-        # but our model expects a string.
         if item.get("outcome") is False:
             item["outcome"] = "Nothing found"
 
-        # Ensure involved_person is consistent with type as per spec
         if item.get("type") == "Vehicle search":
             item["involved_person"] = False
         else:
             item["involved_person"] = True
-            
-        return item
 
+        return item

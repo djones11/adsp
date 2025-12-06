@@ -1,3 +1,4 @@
+import json
 import os
 import socket
 import subprocess
@@ -5,7 +6,7 @@ import sys
 import webbrowser
 from typing import Literal, Optional, cast, get_args
 
-import requests
+import httpx
 from dotenv import load_dotenv
 from invoke.collection import Collection
 from invoke.context import Context
@@ -42,6 +43,7 @@ def validate_service(service: Optional[str]) -> bool:
 
     return True
 
+
 def run(cmd: str, **kwargs) -> None:
     """Helper function to run a shell command."""
     result = subprocess.run(cmd, shell=True, **kwargs)
@@ -67,6 +69,7 @@ def type_check(c: Context) -> None:
     print("Running type checking...")
     run("uv run mypy .")
 
+
 @task
 def lint(c: Context) -> None:
     """Run linting and type checking."""
@@ -87,16 +90,25 @@ def format(c: Context) -> None:
 
 
 @task
-def test(c: Context) -> None:
+def test(c: Context, path: Optional[str] = None) -> None:
     """Run tests inside the container."""
     print("Running tests...")
-    run("docker compose exec web pytest")
+
+    cmd = "docker compose exec web pytest"
+
+    if path:
+        cmd += f" tests/{path}"
+
+    run(cmd)
+
 
 @task
-def trigger_populate_stop_searches(c: Context,) -> None:
+def trigger_stop_search_ingestion(
+    c: Context,
+) -> None:
     """Manual trigger of the daily data population job via script."""
-    print(f"Manually triggering daily data population job ...")
-    cmd = "docker compose exec web python scripts/trigger_populate_stop_searches.py"
+    print("Manually triggering daily data population job ...")
+    cmd = "docker compose exec web python scripts/trigger_stop_search_ingestion.py"
     run(cmd)
 
 
@@ -105,6 +117,52 @@ def remediate_failed_rows(c: Context) -> None:
     """Manual trigger of the remediation job via script."""
     print("Manually triggering remediation...")
     run("docker compose exec web python scripts/trigger_remediation.py")
+
+
+@task(
+    help={
+        "force": "Filter by police force",
+        "start": "Filter by start date (YYYY-MM-DD)",
+        "end": "Filter by end date (YYYY-MM-DD)",
+        "page": "Page number",
+        "limit": "Items per page",
+    }
+)
+def get_stop_searches(
+    c: Context,
+    force: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    page: int = 1,
+    limit: int = 50,
+) -> None:
+    """
+    Retrieve stop and search data from the API.
+    Example of usage of the stop-searches endpoint.
+    """
+    url = f"http://localhost:{WEB_PORT}/v1/stop-searches"
+    params = [f"page={page}", f"page_size={limit}"]
+
+    if force:
+        params.append(f"force={force}")
+    if start:
+        params.append(f"date_start={start}")
+    if end:
+        params.append(f"date_end={end}")
+
+    full_url = f"{url}?{'&'.join(params)}"
+    print(f"Fetching: {full_url}")
+
+    try:
+        response = httpx.get(full_url)
+        response.raise_for_status()
+        data = response.json()
+
+        print(json.dumps(data, indent=2))
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        if "response" in locals():
+            print(response.text)
 
 
 # --- Docker Tasks ---
@@ -117,7 +175,10 @@ def remediate_failed_rows(c: Context) -> None:
     }
 )
 def up(c: Context, build: bool = False, local: bool = False) -> None:
-    """Start all services in detached mode. Use --build to force rebuild. Use --local for hot reload."""
+    """
+    Start all services in detached mode.
+    Use --build to force rebuild. Use --local for hot reload.
+    """
     print("Starting services...")
     cmd = "docker compose -f docker-compose.yml"
 
@@ -169,16 +230,35 @@ def verify(c: Context) -> None:
                 status = "✅ UP" if check_tcp(host, port) else "❌ DOWN"
                 url = f"tcp://{host}:{port}"
             else:
-                url = target
-                response = requests.get(url, timeout=1)
+                url = str(target)
+                response = httpx.get(url, timeout=1)
                 status_code = response.status_code
                 status = "✅ UP" if status_code < 400 else f"⚠️  Status {status_code}"
-            
+
             print(f"{name:<20} {url:<40} {status}")
         except Exception as e:
             # Handle tuple unpacking for error message if target is tuple
-            url_str = f"tcp://{target[0]}:{target[1]}" if isinstance(target, tuple) else target
+            url_str = (
+                f"tcp://{target[0]}:{target[1]}"
+                if isinstance(target, tuple)
+                else target
+            )
             print(f"{name:<20} {url_str:<40} ❌ DOWN ({e})")
+
+
+@task(help={"service": "Service name to restart (e.g. web, worker)"})
+def restart(c: Context, service: Optional[Service] = None) -> None:
+    """Restart all services or a specific service."""
+    if service and not validate_service(service):
+        return
+
+    print(f"Restarting {'service ' + service if service else 'all services'}...")
+    cmd = "docker compose restart"
+
+    if service:
+        cmd += f" {service}"
+
+    run(cmd)
 
 
 # --- Database Tasks ---
@@ -197,11 +277,13 @@ def make_migrations(c: Context, message: str = "New migration") -> None:
     print(f"Creating migration: {message}")
     run(f'docker compose exec web alembic revision --autogenerate -m "{message}"')
 
+
 @task
 def shell(c: Context) -> None:
     """Open a psql shell to the database."""
     print("Opening psql shell...")
     run(f"docker compose exec db psql -U {POSTGRES_USER} -d {POSTGRES_DB}")
+
 
 @task(help={"command": "SQL command to execute"})
 def run_sql(c: Context, command: str) -> None:
@@ -288,8 +370,9 @@ ns.add_task(cast(Task, format))
 # Add web tasks
 web_ns = Collection("web")
 web_ns.add_task(cast(Task, test))
-web_ns.add_task(cast(Task, trigger_populate_stop_searches))
+web_ns.add_task(cast(Task, trigger_stop_search_ingestion))
 web_ns.add_task(cast(Task, remediate_failed_rows))
+web_ns.add_task(cast(Task, get_stop_searches))
 ns.add_collection(web_ns)
 
 # Add docker tasks
@@ -297,6 +380,7 @@ docker_ns = Collection("docker")
 docker_ns.add_task(cast(Task, up))
 docker_ns.add_task(cast(Task, down))
 docker_ns.add_task(cast(Task, verify))
+docker_ns.add_task(cast(Task, restart))
 ns.add_collection(docker_ns)
 
 # Add database tasks under 'db' namespace

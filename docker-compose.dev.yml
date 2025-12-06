@@ -1,5 +1,39 @@
 services:
+  web:
+    environment:
+      - WATCHFILES_FORCE_POLLING=true
+    develop:
+      watch:
+        - action: sync
+          path: .
+          target: /app
+          ignore:
+            - .venv/
+            - __pycache__/
+            - .git/
+            - .pytest_cache/
+            - .ruff_cache/
+            - .mypy_cache/
+            - htmlcov/
+        - action: rebuild
+          path: pyproject.toml
+
   worker:
     command: watchfiles "celery -A app.core.celery_app worker --loglevel=info -Q main-queue" app
     environment:
       - WATCHFILES_FORCE_POLLING=true
+    develop:
+      watch:
+        - action: sync
+          path: .
+          target: /app
+          ignore:
+            - .venv/
+            - __pycache__/
+            - .git/
+            - .pytest_cache/
+            - .ruff_cache/
+            - .mypy_cache/
+            - htmlcov/
+        - action: rebuild
+          path: pyproject.toml

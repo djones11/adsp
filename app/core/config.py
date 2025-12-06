@@ -42,6 +42,7 @@ AVAILABLE_FORCES = Literal[
     "west-yorkshire",
 ]
 
+
 # Populate from .env file
 class Settings(BaseSettings):
     PROJECT_NAME: str = "ADSP Project"
@@ -79,7 +80,15 @@ class Settings(BaseSettings):
             path=f"{values.get('POSTGRES_DB') or ''}",
         )
 
-    CELERY_BROKER_URL: str = "redis://redis:6379/0"
+    RABBITMQ_DEFAULT_USER: str = "guest"
+    RABBITMQ_DEFAULT_PASS: str = "guest"
+    RABBITMQ_PORT: int = 5672
+    RABBITMQ_SERVER: str = "rabbitmq"
+
+    @property
+    def CELERY_BROKER_URL(self) -> str:
+        return f"amqp://{self.RABBITMQ_DEFAULT_USER}:{self.RABBITMQ_DEFAULT_PASS}@{self.RABBITMQ_SERVER}:{self.RABBITMQ_PORT}//"
+
     CELERY_RESULT_BACKEND: str = "redis://redis:6379/0"
     WORKER_PORT: int = 8001
     POLL_HOUR: int = 2

@@ -1,108 +1,251 @@
-# ADSP Project
+# ADSP Interview Task - Police Stop & Search Data Ingestion
 
-This is a backend project built with FastAPI, Celery, PostgreSQL, Redis, and RabbitMQ. It handles daily data processing with robust error handling and monitoring.
+This project is a containerised Python application designed to ingest, process, and store historical stop and search data from the UK Police Data API. It is built to be resilient, scalable, and observable.
 
-## Features
+## 📑 Table of Contents
+- [Project Overview](#-project-overview)
+- [Architecture](#-architecture)
+- [Project Structure](#-project-structure)
+- [Setup & Installation](#-setup--installation)
+- [Available Commands](#-available-commands)
+- [Design Decisions & Trade-offs](#-design-decisions--trade-offs)
+- [Monitoring & Grafana](#-monitoring--grafana)
+- [Productionisation & Future Steps](#-productionisation--future-steps)
 
-- **FastAPI**: REST API for triggering jobs and health checks.
-- **Celery**: Distributed task queue for background processing.
-- **PostgreSQL**: Relational database for storage.
-- **Redis**: Result backend for Celery.
-- **RabbitMQ**: Message broker for Celery.
-- **Prometheus & Grafana**: Monitoring stack.
-- **Error Handling**: Failed rows during import are saved to a separate table (`failed_rows`) without stopping the process.
-- **Performance**: Uses PostgreSQL `COPY` command for high-speed bulk inserts.
+---
 
-## Architecture Decisions
+## 📋 Project Overview
 
-### FastAPI
-- **Why**: Chosen for its high performance (Starlette-based), native asynchronous support, and automatic generation of OpenAPI documentation.
-- **Pros**: Faster execution than Flask/Django, strict type checking with Pydantic reduces runtime errors, and modern Python type hint support.
-- **Cons**: Smaller ecosystem of plugins compared to Django, and not as feature rich.
+The application automatically fetches stop and search data for configured police forces (e.g., Metropolitan Police) on a daily schedule. It handles data remediation, validation, and storage in a PostgreSQL database, exposing the data via a REST API for downstream consumption.
 
-### Celery & RabbitMQ
-- **Why**: We needed a robust, distributed task queue for heavy background processing. RabbitMQ is the industry standard broker for reliability.
-- **Pros**: Celery handles retries, scheduling (Beat), and worker management out of the box. RabbitMQ ensures message persistence better than Redis as a broker.
-- **Cons**: Adds infrastructure complexity (requires a broker and worker processes) compared to simple `asyncio` tasks or Python threads.
+### Key Features
+- **Automated Ingestion**: Daily scheduled tasks (via Celery Beat) to fetch new data.
+- **Resilient Processing**: Retries on API failures, robust error handling, and "dead letter" storage for failed rows.
+- **Data Quality**: Automatic remediation of known data issues (e.g., type mismatches) and validation against a schema using **Pandera**.
+- **High Performance**: 
+    - **Async I/O**: Concurrent fetching of data using `httpx` and `asyncio`.
+    - **Vectorized Processing**: Uses **Pandas** for efficient in-memory data manipulation and cleaning.
+    - **Bulk Inserts**: Uses PostgreSQL `COPY` for efficient bulk insertion of large datasets.
+    - **Celery task splitting**: Distributes force queries across multiple concurrent Celery tasks using chords and groups.
+    - **Non-blocking**: Web server remains responsive even during heavy ingestion loads.
+- **Observability**: Full monitoring stack with Prometheus, Grafana, and Loki.
+- **Containerised**: Fully Dockerised environment for consistent deployment.
 
-### PostgreSQL
-- **Why**: Selected for data integrity, ACID compliance, and specific features like `COPY` for bulk loading.
-- **Pros**: Extremely reliable, handles complex queries and relationships well, and has a rich ecosystem.
-- **Cons**: Heavier resource usage than NoSQL options for simple key-value needs, but necessary for structured relational data.
+---
 
-### Redis
-- **Why**: Used primarily as the Result Backend for Celery to store task states and return values quickly.
-- **Pros**: In-memory speed makes it ideal for caching and temporary state storage.
-- **Cons**: Data persistence requires configuration; not suitable as a primary database for critical relational data in this context.
+## 🏗 Architecture
 
-### Prometheus & Grafana
-- **Why**: To provide real-time visibility into system health and processing metrics.
-- **Pros**: Prometheus uses a pull model ideal for microservices; Grafana provides powerful visualization and alerting capabilities.
-- **Cons**: Adds two additional services to the stack, increasing the memory footprint and operational complexity.
+The system follows a microservices-style architecture orchestrated via Docker Compose:
 
-## Setup
+```mermaid
+%%{init: {'flowchart': {'htmlLabels': true}}}%%
+flowchart LR
 
-1. **Prerequisites**: Ensure Docker and Docker Compose are installed. Python 3.10+ is recommended for local management.
+User -->|HTTP Requests| API[FastAPI]
 
-2. **Install Management Tools**:
-   Install `invoke` and other dev dependencies to manage the project easily.
-   ```bash
-   pip install -e .[dev]
-   ```
+API -->|Reads/Writes| DB[(PostgreSQL<br/>Database)]
+API -->|Cache Hits/Misses| Redis[(Redis<br/>Cache)]
 
-3. **Start Services**:
-   ```bash
-   invoke up
-   ```
-   *Or manually:* `docker compose up -d`
+subgraph Tasks
+    Scheduler[Celery<br/>Beat] -->|Schedules| RabbitMQ[RabbitMQ<br/>Broker]
+    RabbitMQ -->|Distributes| Worker[Celery<br/>Worker]
+    Worker -->|Stores Results| Redis
+    Worker -->|Fetches Data<br/>Async| PoliceAPI[Police<br/>Data API]
+    Worker -->|Bulk Inserts| DB
+end
 
-4. **Run Migrations**:
-   ```bash
-   invoke db.migrate
-   ```
-   *Or manually:* `docker compose exec web alembic upgrade head`
+subgraph Observability
+    API -->|Logs| Promtail[Promtail]
+    Worker -->|Logs| Promtail
+    Promtail -->|Ships Logs| Loki[Loki]
+    
+    Prometheus -->|Scrapes Metrics| API
+    Prometheus -->|Scrapes Metrics| Worker
+    
+    Grafana -->|Visualizes| Prometheus
+    Grafana -->|Visualizes| Loki
+end
+```
 
-5. **Initial Data Load**:
-   ```bash
-   invoke db.init
-   ```
-   *Or manually:* `docker compose exec web python scripts/initial_load.py data/sample_data.csv`
+### Components
+1.  **FastAPI (`web`)**: Provides REST endpoints to query stored data and trigger manual ingestion.
+2.  **Celery Worker (`worker`)**: Executes background tasks (fetching data, processing CSVs, database writes).
+3.  **Celery Beat (`beat`)**: Schedules the daily ingestion task.
+4.  **PostgreSQL (`db`)**: Primary relational store for structured stop and search data.
+5.  **RabbitMQ**: Message broker for task distribution.
+6.  **Redis**: Result backend for Celery and caching.
+7.  **Monitoring Stack**: Prometheus, Grafana, Loki, Promtail, Redis Exporter, Postgres Exporter, RabbitMQ Exporter.
 
-## Management Commands (Invoke)
+---
 
-This project uses `invoke` to manage common tasks. Run `invoke --list` to see all available commands.
+## 📂 Project Structure
 
-- `invoke up`: Start services (use `--build` to force rebuild).
-- `invoke down`: Stop services.
-- `invoke logs`: View logs.
-- `invoke test`: Run tests.
-- `invoke trigger`: Trigger the background job.
-- `invoke verify`: Check health of endpoints.
+```
+adsp/
+├── alembic/                # Database migrations
+├── app/
+│   ├── api/                # API endpoints (v1)
+│   ├── core/               # Config, Celery app, HTTP client
+│   ├── db/                 # Database session and base models
+│   ├── models/             # SQLAlchemy models
+│   ├── schemas/            # Pydantic schemas & Pandera models
+│   ├── services/           # Business logic (Ingestion, Cleaning)
+│   ├── tasks/              # Celery tasks
+│   └── main.py             # FastAPI entrypoint
+├── docker/                 # Docker configuration
+│   ├── grafana/            # Grafana provisioning
+│   ├── loki/               # Loki config
+│   ├── promtail/           # Promtail config
+│   └── Dockerfile          # Main application Dockerfile
+├── scripts/                # Utility scripts
+├── tests/                  # Test suite (mirrors app structure)
+├── .env.example            # Environment variables template
+├── alembic.ini             # Alembic config
+├── docker-compose.yml      # Docker Compose orchestration
+├── pyproject.toml          # Python dependencies & tool config
+├── tasks.py                # Invoke tasks
+└── README.md               # Project documentation
+```
 
-### Database Commands
-- `invoke db.migrate`: Apply migrations.
-- `invoke db.makemigrations --message "..."`: Create a new migration.
-- `invoke db.init`: Load initial data.
-- `invoke db.shell`: Open a psql shell.
-- `invoke db.run --command "SELECT * FROM items"`: Run a SQL command.
+---
 
-## Usage
+## 🚀 Setup & Installation
 
-- **API**: Access the API documentation at `http://localhost:8000/docs`.
-- **Trigger Job**: POST to `http://localhost:8000/trigger-job` to manually start the daily task.
-- **Monitoring**:
-  - Prometheus: `http://localhost:9090`
-  - Grafana: `http://localhost:3000` (Default login: admin/admin)
+### Prerequisites
+*   Docker & Docker Compose
+*   Python 3.11+ (for local development/testing)
+*   `uv` (recommended for Python package management) or `pip`
 
-## Project Structure
+### Running the Application
 
-- `app/`: Main application code.
-  - `core/`: Configuration and Celery app.
-  - `db/`: Database session and base models.
-  - `models/`: SQLAlchemy models.
-  - `schemas/`: Pydantic schemas.
-  - `services/`: Business logic (Importer).
-  - `tasks/`: Celery tasks.
-- `docker/`: Docker configuration files.
-- `scripts/`: Utility scripts.
-- `alembic/`: Database migrations.
+1.  **Clone the repository**:
+    ```bash
+    git clone <repo-url>
+    cd adsp
+    ```
+
+2.  **Configure Environment**:
+    Copy the example environment file and update values as needed:
+    ```bash
+    cp .env.example .env
+    ```
+
+3.  **Install Dependencies**:
+    ```bash
+    # Install project dependencies including development tools (like invoke)
+    uv sync --extra dev
+    ```
+
+4.  **Start the Environment**:
+    ```bash
+    # Builds images and starts all services in detached mode
+    uv run invoke docker.up --build --local
+    ```
+
+5.  **Apply Database Migrations**:
+    The application should auto-migrate on startup, but you can ensure the schema is created:
+    ```bash
+    uv run invoke db.migrate
+    ```
+
+---
+
+## 🛠️ Available Commands
+
+We use `invoke` to manage common tasks. Run `uv run invoke --list` to see all available commands.
+
+### Docker Management
+*   `uv run invoke docker.up`: Start all services (use `--build` to rebuild, `--local` for hot reload).
+*   `uv run invoke docker.down`: Stop all services.
+*   `uv run invoke docker.verify`: Verify that all services (API, DB, Prometheus, etc.) are up and accessible.
+*   `uv run invoke docker.restart`: Restart all services or a specific one (e.g., `docker.restart --service web`).
+
+### Web & Data Tasks
+*   `uv run invoke web.trigger-stop-search-ingestion`: Manually trigger the daily data ingestion job.
+*   `uv run invoke web.remediate-failed-rows`: Manually trigger the remediation job for failed rows.
+*   `uv run invoke web.get-stop-searches`: Query the API for stop and search data (supports filtering).
+*   `uv run invoke web.test`: Run the test suite inside the Docker container.
+
+### Database
+*   `uv run invoke db.migrate`: Apply Alembic migrations.
+*   `uv run invoke db.make-migrations --message "..."`: Create a new migration.
+*   `uv run invoke db.shell`: Open a `psql` shell to the database.
+*   `uv run invoke db.run --command "..."`: Run a raw SQL command.
+
+### Quality & Logs
+*   `uv run invoke lint`: Run linting (Ruff) and type checking (MyPy).
+*   `uv run invoke format`: Format code using Ruff.
+*   `uv run invoke grafana`: Load the grafana dashboard.
+*   `uv run invoke logs.view`: Follow logs for services (e.g., `logs.view --service worker`).
+*   `uv run invoke logs.export`: Exports logs to a file.
+
+---
+
+## 📐 Design Decisions & Trade-offs
+
+### 1. Latency Reduction & Performance
+*   **Pandas & Pandera**: We replaced row-by-row dictionary processing with **Pandas** DataFrames. This allows for vectorized operations (like cleaning empty strings or type conversion) which are significantly faster for large datasets. **Pandera** provides declarative schema validation, ensuring data integrity before it hits the database.
+*   **Asyncio**: The data fetching layer uses `asyncio` and `httpx` to fetch multiple months of data concurrently, rather than sequentially. This drastically reduces the time spent waiting on network I/O from the Police API.
+*   **Celery Task Splitting**: Queries for each police force are distributed across multiple Celery workers using **chords and groups**, allowing concurrent execution of tasks and efficient aggregation of results.
+*   **Bulk Operations**: Database writes use the `COPY` command, which is the fastest way to insert data into PostgreSQL, bypassing the overhead of individual `INSERT` statements.
+
+### 2. Database: PostgreSQL (SQL)
+*   **Decision**: Used a relational database (PostgreSQL) over NoSQL.
+*   **Reasoning**:
+    *   The stop and search data is highly structured with a consistent schema defined by the Police API. Relational databases offer strong data integrity, powerful querying capabilities (essential for the "downstream usage" requirement), and ACID compliance.
+    *   It isn't clear how the data will be used by the downstream user so a relational database offers the greatest flexibility.
+*   **Schema Design**:
+    *   `stop_searches`: Main table with indexed columns (`force`, `datetime`) for fast time-series and geographical querying.
+    *   `failed_rows`: A separate table using `JSONB` to store raw rows that failed validation. This ensures the ingestion pipeline doesn't crash on bad data, allowing for post-mortem analysis and reprocessing.
+
+### 3. Asynchronous Processing: Celery
+*   **Decision**: Decoupled ingestion logic from the web server using Celery.
+*   **Reasoning**: Fetching data from external APIs is I/O bound and potentially slow. Celery allows for:
+    *   **Scalability**: We can add more workers to process multiple forces in parallel.
+    *   **Resilience**: Built-in retry mechanisms for network glitches.
+    *   **Scheduling**: `celery-beat` handles the "daily schedule" requirement natively.
+    *   **Non-blocking**: Allows access to the web API even during ingestion.
+
+### 4. Observability
+*   **Decision**: Integrated a full monitoring stack.
+*   **Reasoning**: In a production environment, knowing *if* the daily job ran and *how many* rows failed is critical. Prometheus metrics track success/failure rates, while Loki aggregates logs for debugging.
+
+---
+
+## 📊 Monitoring & Grafana
+
+The application includes a pre-configured Grafana dashboard to visualize metrics.
+
+1.  **Access Grafana**: Open [http://localhost:3000](http://localhost:3000) in your browser.
+2.  **Login**:
+    *   **Username**: `admin` (or value of `GRAFANA_ADMIN_USER` in `.env`)
+    *   **Password**: `admin` (or value of `GRAFANA_ADMIN_PASSWORD` in `.env`)
+3.  **Dashboards**: Navigate to **Dashboards** to see the pre-provisioned "ADSP Overview" dashboard.
+
+**What you can see:**
+*   **Ingestion Metrics**: Number of records processed, success vs. failure rates.
+*   **System Health**: CPU/Memory usage of containers.
+*   **Logs**: Explore logs via the Loki datasource in the "Explore" tab.
+
+---
+
+## 🏭 Productionisation & Future Steps
+
+To take this solution to production, the following steps are recommended:
+
+1.  **Security**:
+    *   **Non-Root User**: Configure Dockerfiles to run applications as a non-root user to minimize security risks.
+    *   **Secrets Management**: Replace `.env` files with a proper secrets manager (e.g., AWS Secrets Manager, HashiCorp Vault) for sensitive credentials.
+    *   **HTTPS**: Put the API behind a reverse proxy (like Nginx or Traefik) with SSL termination.
+
+2.  **Scalability**:
+    *   **Horizontal Scaling**: The stateless `worker` containers can be scaled horizontally (e.g., in Kubernetes) to handle ingestion for all 40+ UK police forces simultaneously.
+    *   **Database**: Migrate from a containerized Postgres to a managed service (e.g., AWS RDS, Google Cloud SQL) for better availability, backups, and point-in-time recovery.
+
+3.  **Reliability**:
+    *   **Dead Letter Queues (DLQ)**: Configure RabbitMQ DLQs for tasks that fail repeatedly to prevent them from clogging the queue.
+    *   **Circuit Breakers**: Implement circuit breakers for the Police API calls to prevent cascading failures during outages.
+
+4.  **CI/CD**:
+    *   Implement a pipeline (GitHub Actions/GitLab CI) to run tests (`invoke web.test`), linting, and type checking on every commit.
+    *   Automate image building and deployment to a container registry.

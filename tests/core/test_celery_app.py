@@ -1,14 +1,14 @@
+import importlib
 from unittest.mock import patch
 
-from app.core.celery_app import init_worker_process, start_prometheus_server
+import app.core.celery_app
+from app.core.celery_app import celery_app, init_worker_process, start_prometheus_server
 
 
 def test_celery_config():
-    from app.core.celery_app import celery_app
-
     assert celery_app.conf.broker_url
     assert celery_app.conf.result_backend
-    assert "app.tasks.populate_stop_searches" in celery_app.conf.include
+    assert "app.tasks.stop_search_tasks" in celery_app.conf.include
 
 
 @patch("app.core.celery_app.start_http_server")
@@ -27,11 +27,6 @@ def test_start_prometheus_server(mock_registry, mock_multiprocess, mock_start_se
 def test_multiproc_dir_creation(mock_makedirs, mock_exists):
     # Test when dir does not exist
     mock_exists.return_value = False
-
-    # We need to reload the module to trigger the top-level code
-    import importlib
-
-    import app.core.celery_app
 
     importlib.reload(app.core.celery_app)
 

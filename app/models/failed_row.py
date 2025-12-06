@@ -8,6 +8,9 @@ from sqlalchemy.sql import func
 
 from app.db.session import Base
 
+# Generic table to store failed rows from various data ingestion processes for
+# later analysis and reprocessing.
+
 
 class FailedRow(Base):
     __tablename__ = "failed_rows"
@@ -15,6 +18,7 @@ class FailedRow(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     raw_data: Mapped[Dict[str, Any]] = mapped_column(JSONB)  # Store the original JSON
     reason: Mapped[str] = mapped_column(String)
+    source: Mapped[str] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

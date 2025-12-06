@@ -5,8 +5,9 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db.session import SessionLocal
-from app.services.police_api import PoliceAPIService
+from app.services.stop_search_service import PoliceStopSearchService
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -15,7 +16,7 @@ def main():
 
     try:
         logger.info("Starting remediation...")
-        service = PoliceAPIService(db)
+        service = PoliceStopSearchService(db)
         service.remediate_failed_rows()
         logger.info("Remediation completed.")
     except Exception as e:
