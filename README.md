@@ -244,6 +244,7 @@ To take this solution to production, the following steps are recommended:
 2.  **Scalability**:
     *   **Horizontal Scaling**: The stateless `worker` containers can be scaled horizontally (e.g., in Kubernetes) to handle ingestion for all 40+ UK police forces simultaneously.
     *   **Database**: Migrate from a containerized Postgres to a managed service (e.g., AWS RDS, Google Cloud SQL) for better availability, backups, and point-in-time recovery.
+    *   **Querying**: The police API has a very low API rate limiter, which causes a lot of rate limiting errors when backfilling multiple forces, if too many forces are being backfilled at the same time this may result in the number of retries and exponential backoffs being exceeded. Once backfilled this no longer becomes a problem as only the latest months would be queried. If this were to be a problem then force backfilling could be staggered rather than attempting it all at once.
 
 3.  **Reliability**:
     *   **Dead Letter Queues (DLQ)**: Configure RabbitMQ DLQs for tasks that fail repeatedly to prevent them from clogging the queue.
@@ -282,5 +283,3 @@ This project leverages a modern Python stack to ensure code quality, performance
 *   **Alembic**: A lightweight database migration tool for usage with SQLAlchemy. It manages database schema changes (version control for your database).
 *   **Invoke**: A Python task execution tool. Used to create a `tasks.py` file that simplifies common development commands (like `make` but in Python).
 *   **Docker & Docker Compose**: Used to containerize the application and orchestrate the multi-service environment (Web, Worker, DB, Redis, RabbitMQ) for consistent development and deployment.
-
-
