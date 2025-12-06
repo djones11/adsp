@@ -279,7 +279,7 @@ class PoliceStopSearchService:
         # Filter dates to fetch
         dates_to_fetch = []
         for date in available_dates:
-            # If we have data in DB, skip dates before or equal to latest
+            # If data exists in DB, skip dates before or equal to latest
             if latest_date_str and date <= latest_date_str:
                 continue
 

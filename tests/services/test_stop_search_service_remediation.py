@@ -40,7 +40,7 @@ def test_remediate_failed_rows_successfully_cleans_and_inserts_rows(mock_db, moc
         return_value={"some": "cleaned_data"},
     )
 
-    # Mock StopSearch creation (since we pass **cleaned_data)
+    # Mock StopSearch creation (since **cleaned_data is passed)
     with patch("app.services.stop_search_service.StopSearch") as MockStopSearch:
         MockStopSearch.__tablename__ = StopSearch.__tablename__
         service.remediate_failed_rows()

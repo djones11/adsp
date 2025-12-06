@@ -154,7 +154,7 @@ adsp/
 
 ## 🛠️ Available Commands
 
-We use `invoke` to manage common tasks. Run `uv run invoke --list` to see all available commands.
+Uses `invoke` to manage common tasks. Run `uv run invoke --list` to see all available commands.
 
 ### Docker Management
 *   `uv run invoke docker.up`: Start all services (use `--build` to rebuild, `--local` for hot reload).
@@ -204,7 +204,7 @@ We use `invoke` to manage common tasks. Run `uv run invoke --list` to see all av
 ### 3. Asynchronous Processing: Celery
 *   **Decision**: Decoupled ingestion logic from the web server using Celery.
 *   **Reasoning**: Fetching data from external APIs is I/O bound and potentially slow. Celery allows for:
-    *   **Scalability**: We can add more workers to process multiple forces in parallel.
+    *   **Scalability**: More workers can be added to process multiple forces in parallel.
     *   **Resilience**: Built-in retry mechanisms for network glitches.
     *   **Scheduling**: `celery-beat` handles the "daily schedule" requirement natively.
     *   **Non-blocking**: Allows access to the web API even during ingestion.
@@ -255,3 +255,32 @@ To take this solution to production, the following steps are recommended:
 
 5.  **Production image**:
     *   Minimise the footprint of the docker images when running as production images to reduce build time, attack vectors and download time
+
+---
+
+## 🧰 Tools & Technologies
+
+This project leverages a modern Python stack to ensure code quality, performance, and maintainability.
+
+### Core Frameworks
+*   **FastAPI**: A modern, high-performance web framework for building APIs with Python. Selected for its speed, automatic OpenAPI documentation, and native async support.
+*   **Celery**: An asynchronous task queue/job queue based on distributed message passing. Used here to handle long-running data ingestion tasks in the background without blocking the web server.
+*   **SQLAlchemy (Async)**: The Python SQL toolkit and Object Relational Mapper. Uses the async extension to interact with PostgreSQL non-blockingly.
+
+### Data Processing
+*   **Pandas**: A powerful data analysis and manipulation library. Used for vectorized processing of API data, which is significantly faster than iterating through Python dictionaries.
+*   **Pandera**: A statistical data validation library for Pandas. It enforces schema validation on DataFrames before they are inserted into the database, ensuring data quality.
+
+### Quality & Testing
+*   **Pytest**: The testing framework used for unit and integration tests.
+*   **Pytest-xdist**: A plugin for pytest that allows tests to run in parallel across multiple CPUs. This significantly reduces the time required to run the test suite.
+*   **Ruff**: An extremely fast Python linter and code formatter, written in Rust. It replaces multiple tools (Flake8, Black, isort) to enforce coding standards and style.
+*   **MyPy**: A static type checker for Python. It helps catch type-related bugs before runtime by enforcing type hints throughout the codebase.
+*   **Bandit**: A tool designed to find common security issues in Python code. It scans the codebase for vulnerabilities like hardcoded passwords, weak cryptography, or unsafe file operations.
+
+### Infrastructure & DevOps
+*   **Alembic**: A lightweight database migration tool for usage with SQLAlchemy. It manages database schema changes (version control for your database).
+*   **Invoke**: A Python task execution tool. Used to create a `tasks.py` file that simplifies common development commands (like `make` but in Python).
+*   **Docker & Docker Compose**: Used to containerize the application and orchestrate the multi-service environment (Web, Worker, DB, Redis, RabbitMQ) for consistent development and deployment.
+
+

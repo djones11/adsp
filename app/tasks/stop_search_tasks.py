@@ -39,7 +39,7 @@ def insert_rows(
         columns,
     )
 
-    # Check if we have data to insert
+    # Check if there is data to insert
     if os.path.exists(final_csv_path):
         with open(final_csv_path, "r") as f:
             line_count = sum(1 for line in f) - 1  # Exclude header
@@ -87,7 +87,7 @@ def fetch_stop_search_task(
     try:
         service = PoliceStopSearchService(db)
         # If dates is None, it's the first run. If it's a list, it's a retry.
-        # If it's a retry, we want to append to the existing CSVs.
+        # If it's a retry, append to the existing CSVs.
         append = dates is not None
 
         return asyncio.run(

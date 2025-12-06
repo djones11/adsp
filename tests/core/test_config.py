@@ -9,8 +9,8 @@ def test_settings_correctly_assembles_database_url():
 
     assert str(settings.DATABASE_URL) == "postgresql://user:pass@host:5432/db"
 
-    # We use patch.dict to simulate environment variables, which is how the app runs.
-    # We also need to ensure DATABASE_URL is not set in env, or is empty.
+    # Uses patch.dict to simulate environment variables, which is how the app runs.
+    # Also need to ensure DATABASE_URL is not set in env, or is empty.
     with patch.dict(
         os.environ,
         {

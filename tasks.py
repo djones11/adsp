@@ -3,6 +3,7 @@ import os
 import socket
 import subprocess
 import sys
+import time
 import webbrowser
 from typing import Literal, Optional, cast, get_args
 
@@ -207,6 +208,22 @@ def up(c: Context, build: bool = False, local: bool = False) -> None:
         cmd += " --build"
 
     run(cmd)
+
+    print("Waiting for database to be ready...")
+    retries = 30
+    while retries > 0:
+        try:
+            with socket.create_connection(("localhost", int(POSTGRES_PORT)), timeout=1):
+                print("Database is ready!")
+                break
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            time.sleep(1)
+            retries -= 1
+            if retries == 0:
+                print("Warning: Database did not become ready in time.")
+
+    # Run migrations automatically
+    migrate(c)
 
 
 @task
