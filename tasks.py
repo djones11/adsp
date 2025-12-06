@@ -86,6 +86,13 @@ def format(c: Context) -> None:
     run("uv run ruff format .")
 
 
+@task
+def security(c: Context) -> None:
+    """Run security checks using bandit."""
+    print("Running security checks...")
+    run("uv run bandit -lll -r app/")
+
+
 # --- Web Tasks ---
 
 
@@ -98,6 +105,14 @@ def test(c: Context, path: Optional[str] = None) -> None:
 
     if path:
         cmd += f" tests/{path}"
+
+        # If testing a specific file, disable test parallelization
+        if path.endswith(".py"):
+            cmd += " -n 0"
+        else:
+            cmd += " -n auto"
+    else:
+        cmd += " -n auto"
 
     run(cmd)
 
@@ -302,9 +317,7 @@ def run_sql(c: Context, command: str) -> None:
 
 
 @task(help={"service": "Service name to filter logs (e.g. web, worker)"})
-def view(
-    c: Context, service: Optional[Service] = None, tail: Optional[int] = None
-) -> None:
+def view(c: Context, service: Optional[Service] = None) -> None:
     """Follow logs for all services or a specific service."""
     if not validate_service(service):
         return
@@ -313,9 +326,6 @@ def view(
 
     if service:
         cmd += f" {service}"
-
-    if tail:
-        cmd += f" --tail {tail}"
 
     run(cmd)
 
@@ -366,6 +376,7 @@ ns.add_task(cast(Task, grafana))
 ns.add_task(cast(Task, lint))
 ns.add_task(cast(Task, type_check))
 ns.add_task(cast(Task, format))
+ns.add_task(cast(Task, security))
 
 # Add web tasks
 web_ns = Collection("web")

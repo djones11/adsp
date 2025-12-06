@@ -29,9 +29,9 @@ def rate_limit_wait(retry_state) -> float:
         logger.warning(f"Rate limited. Retrying after {exc.retry_after:.2f} seconds...")
         return float(exc.retry_after)
 
-    # Exponential backoff with small random jitter to avoid thundering herd
+    # Exponential backoff with jitter to avoid thundering herd
     attempt = retry_state.attempt_number - 1
-    delay = 2**attempt * (1 + random.uniform(0, 0.1))
+    delay = (2**attempt) + random.uniform(0.5, 5)
 
     logger.warning(f"Request failed: {exc}. Retrying in {delay:.2f} seconds...")
 

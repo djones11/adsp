@@ -1,17 +1,16 @@
 import asyncio
-import pytest
-
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.services.stop_search_service import PoliceStopSearchService
 
 
-def test_fetch_and_process_force(db, mocker):
+def test_fetch_and_process_force_handles_valid_and_invalid_data(db, mocker):
     async def run_test():
         mocker.patch(
             "app.services.stop_search_service.make_request_async",
-            return_value=[ # 1 valid, 1 invalid
+            return_value=[  # 1 valid, 1 invalid
                 {
                     "age_range": "18-24",
                     "officer_defined_ethnicity": None,
@@ -72,7 +71,7 @@ def test_fetch_and_process_force(db, mocker):
     asyncio.run(run_test())
 
 
-def test_process_data_in_memory_with_remediation(db, mocker):
+def test_process_data_remediates_invalid_rows_in_memory(db, mocker):
     # Sample data with a row that needs remediation (empty string for boolean)
     data = [
         {
@@ -124,12 +123,13 @@ def test_fetch_and_process_force_exception(db, mocker):
         )
 
         mock_client = MagicMock()
-        valid, failed = await service._fetch_stop_search_data(
-            "leicestershire", "2023-01", client=mock_client
-        )
 
-        assert valid == []
-        assert failed == []
+        with pytest.raises(Exception) as excinfo:
+            await service._fetch_stop_search_data(
+                "leicestershire", "2023-01", client=mock_client
+            )
+
+        assert "API Error" in str(excinfo.value)
 
     asyncio.run(run_test())
 
@@ -161,11 +161,14 @@ def test_process_data_in_memory_failures(
             assert len(valid) == expected_valid
             assert len(failed) == expected_failed
 
+
 def test_fetch_data_with_date(db, mocker):
     async def run_test():
         service = PoliceStopSearchService(db)
 
-        mock_make_request = mocker.patch("app.services.stop_search_service.make_request_async")
+        mock_make_request = mocker.patch(
+            "app.services.stop_search_service.make_request_async"
+        )
         mock_make_request.return_value = []
 
         mock_client = MagicMock()
@@ -181,6 +184,7 @@ def test_fetch_data_with_date(db, mocker):
         assert call_args[0][1] == {"force": "norfolk", "date": "2023-01"}
 
     asyncio.run(run_test())
+
 
 def test_fetch_and_process_force_no_data(db, mocker):
     async def run_test():
@@ -198,6 +202,7 @@ def test_fetch_and_process_force_no_data(db, mocker):
 
     asyncio.run(run_test())
 
+
 @pytest.mark.parametrize(
     "location_data, expected_lat, expected_street_id",
     [
@@ -213,7 +218,7 @@ def test_fetch_and_process_force_no_data(db, mocker):
             123,
         ),
     ],
-    ids=["no_location", "no_street", "with_street"]
+    ids=["no_location", "no_street", "with_street"],
 )
 def test_create_stop_search_dict_location_scenarios(
     db, location_data, expected_lat, expected_street_id
@@ -252,6 +257,7 @@ def test_get_dates_to_process_no_dates(db, mocker):
     dates = service._get_dates_to_process("leicestershire")
     assert dates == []
 
+
 def test_download_stop_search_data_no_dates(db, mocker):
     async def run_test():
         service = PoliceStopSearchService(db)
@@ -261,6 +267,7 @@ def test_download_stop_search_data_no_dates(db, mocker):
         assert result is None
 
     asyncio.run(run_test())
+
 
 def test_download_stop_search_data_success(db, mocker, tmp_path):
     async def run_test():
@@ -283,7 +290,7 @@ def test_download_stop_search_data_success(db, mocker, tmp_path):
             )
 
             assert result is not None
-            
+
             valid_path, failed_path = result
 
             assert "valid_leicestershire.csv" in valid_path

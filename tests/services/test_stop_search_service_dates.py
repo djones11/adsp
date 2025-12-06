@@ -1,11 +1,12 @@
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
-from app.services.stop_search_service import PoliceStopSearchService
 import pytest
 
+from app.services.stop_search_service import PoliceStopSearchService
 
-def test_get_dates_to_process(db, mocker):
+
+def test_get_dates_to_process_returns_dates_after_latest_db_date(db, mocker):
     service = PoliceStopSearchService(db)
 
     # Mock _get_available_dates
@@ -16,7 +17,9 @@ def test_get_dates_to_process(db, mocker):
     )
 
     # Mock _get_latest_datetime
-    mocker.patch.object(service, "_get_latest_datetime", return_value=datetime(2023, 1, 15))
+    mocker.patch.object(
+        service, "_get_latest_datetime", return_value=datetime(2023, 1, 15)
+    )
 
     # Test with no target date
     dates = service._get_dates_to_process("leicestershire")
@@ -24,7 +27,7 @@ def test_get_dates_to_process(db, mocker):
     assert dates == ["2023-02", "2023-03"]
 
 
-def test_get_dates_to_process_no_availability(db, mocker):
+def test_get_dates_to_process_returns_empty_if_no_availability(db, mocker):
     service = PoliceStopSearchService(db)
     mocker.patch.object(service, "_get_available_dates", return_value={})
 
@@ -33,7 +36,7 @@ def test_get_dates_to_process_no_availability(db, mocker):
     assert dates == []
 
 
-def test_get_dates_to_process_no_latest_date(db, mocker):
+def test_get_dates_to_process_returns_all_dates_if_db_empty(db, mocker):
     service = PoliceStopSearchService(db)
 
     mocker.patch.object(
@@ -47,7 +50,8 @@ def test_get_dates_to_process_no_latest_date(db, mocker):
 
     assert dates == ["2023-01", "2023-02"]
 
-def test_get_available_dates(db, mocker):
+
+def test_get_available_dates_parses_api_response_correctly(db, mocker):
     service = PoliceStopSearchService(db)
     mock_response = [
         {"date": "2024-01", "stop-and-search": ["leicestershire", "metropolitan"]},
@@ -66,7 +70,7 @@ def test_get_available_dates(db, mocker):
     assert availability["metropolitan"] == ["2024-01"]
 
 
-def test_get_available_dates_error(db, mocker):
+def test_get_available_dates_returns_empty_dict_on_api_error(db, mocker):
     service = PoliceStopSearchService(db)
     mocker.patch(
         "app.services.stop_search_service.make_request",
@@ -76,7 +80,8 @@ def test_get_available_dates_error(db, mocker):
     availability = service._get_available_dates()
     assert availability == {}
 
-def test_get_available_dates_missing_date(db):
+
+def test_get_available_dates_skips_entries_missing_date_field(db):
     """Test _get_available_dates with an entry missing the date field."""
     service = PoliceStopSearchService(db)
 
@@ -93,7 +98,8 @@ def test_get_available_dates_missing_date(db):
     assert "suffolk" in availability
     assert "essex" not in availability
 
-def test_get_latest_date_real(db):
+
+def test_get_latest_datetime_queries_db_correctly(db):
     """Test get_latest_date without mocking the private method."""
     mock_db_session = MagicMock()
     service = PoliceStopSearchService(mock_db_session)
@@ -105,8 +111,9 @@ def test_get_latest_date_real(db):
     result = service._get_latest_datetime("suffolk")
 
     assert result == datetime(2023, 1, 1)
-    
+
     mock_db_session.query.assert_called()
+
 
 @pytest.mark.parametrize(
     "available_dates, latest_db_date, expected_dates",
@@ -120,7 +127,7 @@ def test_get_latest_date_real(db):
         # Latest data is older than all available, fetch all
         (["2023-02", "2023-03"], datetime(2023, 1, 15), ["2023-02", "2023-03"]),
     ],
-    ids=["no_previous_data", "latest_jan", "latest_feb", "latest_older"]
+    ids=["no_previous_data", "latest_jan", "latest_feb", "latest_older"],
 )
 def test_get_dates_to_process_filtering(
     db, mocker, available_dates, latest_db_date, expected_dates

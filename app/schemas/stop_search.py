@@ -2,7 +2,7 @@ from datetime import datetime as dt_type
 from typing import Generic, List, Optional, TypeVar
 
 import pandas as pd
-import pandera as pa
+import pandera.pandas as pa
 from pandera.typing import Series
 from pydantic import BaseModel, ConfigDict
 
@@ -10,24 +10,7 @@ from app.core.config import AVAILABLE_FORCES
 
 T = TypeVar("T")
 
-# Expected schemas for StopSearch data coming from the police API
 # Pydantic models for API responses and internal use
-
-
-class OutcomeObject(BaseModel):
-    id: Optional[str] = None
-    name: Optional[str] = None
-
-
-class Street(BaseModel):
-    id: Optional[int] = None
-    name: Optional[str] = None
-
-
-class Location(BaseModel):
-    latitude: Optional[str] = None
-    longitude: Optional[str] = None
-    street: Optional[Street] = None
 
 
 class StopSearchBase(BaseModel):
@@ -36,7 +19,10 @@ class StopSearchBase(BaseModel):
     datetime: dt_type
     operation: Optional[bool] = None
     operation_name: Optional[str] = None
-    location: Optional[Location] = None
+    latitude: Optional[str] = None
+    longitude: Optional[str] = None
+    street_id: Optional[int] = None
+    street_name: Optional[str] = None
     gender: Optional[str] = None
     age_range: Optional[str] = None
     self_defined_ethnicity: Optional[str] = None
@@ -46,7 +32,8 @@ class StopSearchBase(BaseModel):
     outcome: Optional[str] = None
     outcome_linked_to_object_of_search: Optional[bool] = None
     removal_of_more_than_outer_clothing: Optional[bool] = None
-    outcome_object: Optional[OutcomeObject] = None
+    outcome_object_id: Optional[str] = None
+    outcome_object_name: Optional[str] = None
 
 
 class StopSearch(StopSearchBase):

@@ -90,8 +90,17 @@ class UvicornThread(threading.Thread):
 
 
 @pytest.fixture(scope="session")
-def server():
-    port = 8002
+def server(worker_id):
+    if worker_id == "master":
+        port = 8002
+    else:
+        # gw0 -> 8003, gw1 -> 8004, etc.
+        try:
+            suffix = int(worker_id.replace("gw", ""))
+            port = 8003 + suffix
+        except ValueError:
+            port = 8002
+
     thread = UvicornThread(app, port)
     thread.start()
 

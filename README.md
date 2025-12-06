@@ -28,6 +28,7 @@ The application automatically fetches stop and search data for configured police
     - **Bulk Inserts**: Uses PostgreSQL `COPY` for efficient bulk insertion of large datasets.
     - **Celery task splitting**: Distributes force queries across multiple concurrent Celery tasks using chords and groups.
     - **Non-blocking**: Web server remains responsive even during heavy ingestion loads.
+    - **Discriminatory Queries**: Fetches only available, previously un-ingested dates to avoid duplicate data retrieval.
 - **Observability**: Full monitoring stack with Prometheus, Grafana, and Loki.
 - **Containerised**: Fully Dockerised environment for consistent deployment.
 
@@ -88,7 +89,7 @@ adsp/
 │   ├── core/               # Config, Celery app, HTTP client
 │   ├── db/                 # Database session and base models
 │   ├── models/             # SQLAlchemy models
-│   ├── schemas/            # Pydantic schemas & Pandera models
+│   ├── schemas/            # Pydantic and Pandera schemas
 │   ├── services/           # Business logic (Ingestion, Cleaning)
 │   ├── tasks/              # Celery tasks
 │   └── main.py             # FastAPI entrypoint
@@ -102,6 +103,7 @@ adsp/
 ├── .env.example            # Environment variables template
 ├── alembic.ini             # Alembic config
 ├── docker-compose.yml      # Docker Compose orchestration
+├── docker-compose.dev.yml  # Additional settings for local development, use --local tag on docker.up to use
 ├── pyproject.toml          # Python dependencies & tool config
 ├── tasks.py                # Invoke tasks
 └── README.md               # Project documentation
@@ -175,6 +177,7 @@ We use `invoke` to manage common tasks. Run `uv run invoke --list` to see all av
 ### Quality & Logs
 *   `uv run invoke lint`: Run linting (Ruff) and type checking (MyPy).
 *   `uv run invoke format`: Format code using Ruff.
+*   `uv run invoke security`: Run security checks using Bandit.
 *   `uv run invoke grafana`: Load the grafana dashboard.
 *   `uv run invoke logs.view`: Follow logs for services (e.g., `logs.view --service worker`).
 *   `uv run invoke logs.export`: Exports logs to a file.
@@ -184,7 +187,7 @@ We use `invoke` to manage common tasks. Run `uv run invoke --list` to see all av
 ## 📐 Design Decisions & Trade-offs
 
 ### 1. Latency Reduction & Performance
-*   **Pandas & Pandera**: We replaced row-by-row dictionary processing with **Pandas** DataFrames. This allows for vectorized operations (like cleaning empty strings or type conversion) which are significantly faster for large datasets. **Pandera** provides declarative schema validation, ensuring data integrity before it hits the database.
+*   **Pandas & Pandera**: Uses **Pandas** DataFrames to avoid row-by-row dictionary processing. This allows for vectorized operations (like cleaning empty strings or type conversion) which are significantly faster for large datasets. **Pandera** provides declarative schema validation, ensuring data integrity before it hits the database. Avoided converting incoming API data to pydantic models on ingestion to improve performance using strictly dataframes.
 *   **Asyncio**: The data fetching layer uses `asyncio` and `httpx` to fetch multiple months of data concurrently, rather than sequentially. This drastically reduces the time spent waiting on network I/O from the Police API.
 *   **Celery Task Splitting**: Queries for each police force are distributed across multiple Celery workers using **chords and groups**, allowing concurrent execution of tasks and efficient aggregation of results.
 *   **Bulk Operations**: Database writes use the `COPY` command, which is the fastest way to insert data into PostgreSQL, bypassing the overhead of individual `INSERT` statements.
@@ -249,3 +252,6 @@ To take this solution to production, the following steps are recommended:
 4.  **CI/CD**:
     *   Implement a pipeline (GitHub Actions/GitLab CI) to run tests (`invoke web.test`), linting, and type checking on every commit.
     *   Automate image building and deployment to a container registry.
+
+5.  **Production image**:
+    *   Minimise the footprint of the docker images when running as production images to reduce build time, attack vectors and download time

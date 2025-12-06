@@ -4,7 +4,7 @@ from unittest.mock import patch
 from app.core.config import Settings
 
 
-def test_settings_assemble_db_connection():
+def test_settings_correctly_assembles_database_url():
     settings = Settings(DATABASE_URL="postgresql://user:pass@host:5432/db")
 
     assert str(settings.DATABASE_URL) == "postgresql://user:pass@host:5432/db"

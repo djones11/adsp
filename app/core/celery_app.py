@@ -43,7 +43,7 @@ def init_worker_process(*args, **kwargs):
 celery_app.conf.beat_schedule = {
     "daily-processing-task": {
         "task": "app.tasks.stop_search_tasks.ingest_stop_searches",
-        "schedule": crontab(hour=21, minute=33)# crontab(hour=settings.POLL_HOUR, minute=0),
+        "schedule": crontab(hour=settings.POLL_HOUR, minute=0),
     },
 }
 

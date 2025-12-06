@@ -8,7 +8,7 @@ from tenacity import stop_after_attempt
 from app.core.http_client import RateLimitError, make_request, make_request_async
 
 
-def test_make_request_success():
+def test_make_request_returns_json_on_success():
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {"data": "ok"}
@@ -18,7 +18,7 @@ def test_make_request_success():
         assert result == {"data": "ok"}
 
 
-def test_make_request_rate_limit():
+def test_make_request_retries_on_rate_limit_error():
     # First response 429, second 200
     mock_response_429 = MagicMock()
     mock_response_429.status_code = 429
@@ -33,7 +33,7 @@ def test_make_request_rate_limit():
         assert result == {"data": "ok"}
 
 
-def test_make_request_retry_exception():
+def test_make_request_retries_on_request_error():
     # First raises exception, second succeeds
     mock_response_200 = MagicMock()
     mock_response_200.status_code = 200
@@ -50,7 +50,7 @@ def test_make_request_retry_exception():
         assert result == {"data": "ok"}
 
 
-def test_make_request_max_retries():
+def test_make_request_raises_error_after_max_retries():
     # Override retry stop to speed up test
     make_request.retry.stop = stop_after_attempt(2)
 
@@ -61,7 +61,7 @@ def test_make_request_max_retries():
             make_request("http://test.com")
 
 
-def test_make_request_max_retries_rate_limit():
+def test_make_request_raises_rate_limit_error_after_max_retries():
     # Override retry stop to speed up test
     make_request.retry.stop = stop_after_attempt(2)
 
@@ -74,7 +74,7 @@ def test_make_request_max_retries_rate_limit():
             make_request("http://test.com")
 
 
-def test_make_request_async_success():
+def test_make_request_async_returns_json_on_success():
     async def run_test():
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -89,7 +89,7 @@ def test_make_request_async_success():
     asyncio.run(run_test())
 
 
-def test_make_request_async_no_client():
+def test_make_request_async_creates_client_if_none_provided():
     async def run_test():
         mock_response = MagicMock()
         mock_response.status_code = 200

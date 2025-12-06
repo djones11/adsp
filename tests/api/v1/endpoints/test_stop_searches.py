@@ -65,7 +65,7 @@ def populate_seed_data(db):
     yield
 
 
-def test_stop_searches(client, db, populate_seed_data):
+def test_get_stop_searches_returns_all_records(client, db, populate_seed_data):
     response = client.get(f"{API_ENDPOINT}/")
 
     assert response.status_code == 200
@@ -76,7 +76,7 @@ def test_stop_searches(client, db, populate_seed_data):
     assert len(data["data"]) == 2
 
 
-def test_stop_searches_force_filter(client, db, populate_seed_data):
+def test_get_stop_searches_filters_by_force(client, db, populate_seed_data):
     response = client.get(f"{API_ENDPOINT}/?force=leicestershire")
 
     assert response.status_code == 200
@@ -87,7 +87,7 @@ def test_stop_searches_force_filter(client, db, populate_seed_data):
     assert data["data"][0]["force"] == "leicestershire"
 
 
-def test_stop_searches_date_filter(client, db, populate_seed_data):
+def test_get_stop_searches_filters_by_start_date(client, db, populate_seed_data):
     # Test filter by date
     response = client.get(f"{API_ENDPOINT}/?date_start=2024-01-02")
 

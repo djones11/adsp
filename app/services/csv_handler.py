@@ -14,15 +14,23 @@ logger = logging.getLogger(__name__)
 
 class CSVHandler:
     @staticmethod
-    def write_rows(file_path: str, objects: List[Any], columns: List[str]) -> None:
+    def write_rows(
+        file_path: str, objects: List[Any], columns: List[str], mode: str = "w"
+    ) -> None:
         """
         Writes a list of objects to a CSV file using the provided columns.
         """
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
-        with open(file_path, "w", newline="", encoding="utf-8") as f:
+        write_header = True
+
+        if mode == "a" and os.path.exists(file_path):
+            write_header = False
+
+        with open(file_path, mode, newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(columns)
+            if write_header:
+                writer.writerow(columns)
 
             for obj in objects:
                 row = []
@@ -118,7 +126,9 @@ class CSVHandler:
 
             return
         except Exception as e:
-            logger.warning(f"Full copy failed for {file_path}, falling back to chunking: {e}")
+            logger.warning(
+                f"Full copy failed for {file_path}, falling back to chunking: {e}"
+            )
             try:
                 cursor.execute("ROLLBACK TO SAVEPOINT full_copy_savepoint")
             except Exception:
@@ -132,12 +142,12 @@ class CSVHandler:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 header = f.readline()
-                
+
                 if not header:
                     return
 
                 batch = []
-                
+
                 for line in f:
                     batch.append(line)
 

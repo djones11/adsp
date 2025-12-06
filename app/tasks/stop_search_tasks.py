@@ -15,6 +15,7 @@ from app.services.csv_handler import CSVHandler
 from app.services.stop_search_service import (
     FAILED_ROW_COLUMNS,
     STOP_SEARCH_COLUMNS,
+    PartialDownloadError,
     PoliceStopSearchService,
 )
 
@@ -55,8 +56,26 @@ def insert_rows(
         logger.error(f"Failed to create merged CSV file at {final_csv_path}")
 
 
+def _retry_attempt(
+    self, force: AVAILABLE_FORCES, e: Exception, dates: Optional[List[str]] = None
+) -> None:
+    # Manual retry implemented instead of autoretry_for to prevent an error
+    # when run in a chord causing the whole chord to fail.
+
+    try:
+        retry_delay = (2**self.request.retries) + random.uniform(0.5, 5)
+        self.retry(exc=e, countdown=retry_delay, args=[force, dates])
+    except MaxRetriesExceededError:
+        logger.error(
+            f"Max retries exceeded for {force}. "
+            "Returning None to allow chord to proceed."
+        )
+
+
 @celery_app.task(bind=True, max_retries=5)
-def fetch_stop_search_task(self, force: AVAILABLE_FORCES) -> Optional[Tuple[str, str]]:
+def fetch_stop_search_task(
+    self, force: AVAILABLE_FORCES, dates: Optional[List[str]] = None
+) -> Optional[Tuple[str, str]]:
     """
     Fetches data for a single force and writes to temp CSVs.
     Returns paths to (valid_csv, failed_csv).
@@ -67,25 +86,29 @@ def fetch_stop_search_task(self, force: AVAILABLE_FORCES) -> Optional[Tuple[str,
 
     try:
         service = PoliceStopSearchService(db)
-        return asyncio.run(service.download_stop_search_data(force))
+        # If dates is None, it's the first run. If it's a list, it's a retry.
+        # If it's a retry, we want to append to the existing CSVs.
+        append = dates is not None
+
+        return asyncio.run(
+            service.download_stop_search_data(force, dates=dates, append=append)
+        )
+
+    except PartialDownloadError as e:  # Usually due to rate limiting
+        logger.warning(
+            f"Partial failure for {force}. Retrying {len(e.failed_dates)} dates."
+        )
+
+        _retry_attempt(self, force, e, e.failed_dates)
+
+        return None
 
     except Exception as e:
         logger.error(f"Error in fetch task for {force}: {e}")
 
-        # Manual retry implemented instead of autoretry_for to prevent an error
-        # when run in a chord causing the whole chord to fail.
-        try:
-            # Exponential backoff: 2^retries (1s, 2s, 4s, 8s, 16s) with jitter
-            retry_delay = (2**self.request.retries) + random.uniform(0, 1)
-            self.retry(exc=e, countdown=retry_delay)
-            return None
-        except MaxRetriesExceededError:
-            logger.error(
-                f"Max retries exceeded for {force}. "
-                "Returning None to allow chord to proceed."
-            )
+        _retry_attempt(self, force, e, dates)
 
-            return None
+        return None
     finally:
         db.close()
 

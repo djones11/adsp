@@ -12,7 +12,7 @@ def mock_db():
     return MagicMock()
 
 
-def test_remediate_failed_rows_no_rows(mock_db):
+def test_remediate_failed_rows_does_nothing_if_no_failed_rows(mock_db):
     service = PoliceStopSearchService(mock_db)
     # Mock query to return empty list
     mock_db.query.return_value.filter.return_value.all.return_value = []
@@ -23,7 +23,7 @@ def test_remediate_failed_rows_no_rows(mock_db):
     mock_db.add.assert_not_called()
 
 
-def test_remediate_failed_rows_success(mock_db, mocker):
+def test_remediate_failed_rows_successfully_cleans_and_inserts_rows(mock_db, mocker):
     service = PoliceStopSearchService(mock_db)
 
     # Mock failed row
@@ -51,7 +51,7 @@ def test_remediate_failed_rows_success(mock_db, mocker):
         mock_db.commit.assert_called()
 
 
-def test_remediate_failed_rows_exception(mock_db, mocker):
+def test_remediate_failed_rows_rolls_back_on_exception(mock_db, mocker):
     service = PoliceStopSearchService(mock_db)
 
     failed_row = MagicMock(spec=FailedRow)

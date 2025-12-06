@@ -15,7 +15,7 @@ def mock_db():
     return MagicMock()
 
 
-def test_write_rows_objects(tmp_path):
+def test_write_rows_writes_objects_to_csv(tmp_path):
     file_path = tmp_path / "test_rows_obj.csv"
 
     class MockObject:
@@ -38,7 +38,7 @@ def test_write_rows_objects(tmp_path):
         assert "val3,val4" in lines[2]
 
 
-def test_write_rows_dicts(tmp_path):
+def test_write_rows_writes_dicts_to_csv(tmp_path):
     file_path = tmp_path / "test_rows_dict.csv"
 
     rows = [{"col1": "val1", "col2": "val2"}, {"col1": "val3", "col2": "val4"}]
@@ -56,7 +56,7 @@ def test_write_rows_dicts(tmp_path):
         assert "val3,val4" in lines[2]
 
 
-def test_merge_csvs(tmp_path):
+def test_merge_csvs_combines_files_and_cleans_up(tmp_path):
     output_path = tmp_path / "merged.csv"
     input1 = tmp_path / "input1.csv"
     input2 = tmp_path / "input2.csv"
@@ -84,7 +84,7 @@ def test_merge_csvs(tmp_path):
         assert "row2_c1,row2_c2" in content
 
 
-def test_read_rows(tmp_path):
+def test_read_rows_returns_list_of_rows(tmp_path):
     file_path = tmp_path / "test_read.csv"
 
     with open(file_path, "w", newline="", encoding="utf-8") as f:
@@ -96,7 +96,7 @@ def test_read_rows(tmp_path):
     assert rows[0] == ["val1", "val2"]
 
 
-def test_read_rows_no_file():
+def test_read_rows_returns_empty_list_if_file_missing():
     rows = CSVHandler.read_rows("non_existent.csv")
     assert rows == []
 
@@ -161,6 +161,7 @@ def test_handle_failed_row():
     assert call_args.source == "stop_searches"
     assert call_args.reason == "Error"
     assert call_args.raw_data == {"col1": "val1", "col2": "val2"}
+
 
 def test_bulk_insert_file_not_found(mock_db):
     with patch("os.path.exists", return_value=False):
@@ -246,7 +247,7 @@ def test_insert_batch_adaptive_splitting(mock_db):
 
         if len(content.splitlines()) > 2:  # header + more than 1 row
             raise Exception("Batch failed")
-        
+
         return None
 
     mock_cursor.copy_expert.side_effect = side_effect
@@ -342,7 +343,7 @@ def test_insert_batch_rollback_failure(mock_db):
     def execute_side_effect(sql):
         if "ROLLBACK" in sql:
             raise Exception("Rollback failed")
-        
+
         return None
 
     mock_cursor.execute.side_effect = execute_side_effect

@@ -16,7 +16,7 @@ from app.core.config import AVAILABLE_FORCES, settings
 from app.core.http_client import make_request, make_request_async
 from app.models.failed_row import FailedRow
 from app.models.stop_search import StopSearch
-from app.schemas.stop_search import StopSearchBase, StopSearchDataFrameSchema
+from app.schemas.stop_search import StopSearchDataFrameSchema
 from app.services.csv_handler import CSVHandler
 from app.services.data_cleaner import DataCleaner
 
@@ -66,18 +66,31 @@ FAILED_ROWS = Counter(
 )
 
 
+class PartialDownloadError(Exception):
+    def __init__(self, failed_dates: List[str], message: str):
+        self.failed_dates = failed_dates
+        super().__init__(message)
+
+
 class PoliceStopSearchService:
     def __init__(self, db: Session):
         self.db = db
 
     async def download_stop_search_data(
-        self, force: AVAILABLE_FORCES, output_dir: str = "/tmp"
+        self,
+        force: AVAILABLE_FORCES,
+        output_dir: str = "/tmp",
+        dates: Optional[List[str]] = None,
+        append: bool = False,
     ) -> Optional[Tuple[str, str]]:
         """
         Fetches data for a force and dumps it to CSV files.
         Returns paths to (valid_csv, failed_csv).
         """
-        dates_to_fetch = self._get_dates_to_process(force)
+        if dates:
+            dates_to_fetch = dates
+        else:
+            dates_to_fetch = self._get_dates_to_process(force)
 
         if not dates_to_fetch:
             logger.info(f"No new dates to fetch for {force}")
@@ -85,8 +98,9 @@ class PoliceStopSearchService:
 
         logger.info(f"Fetching dates for {force}: {dates_to_fetch}")
 
-        all_valid_objects = []
-        all_failed_rows = []
+        all_valid_objects: List[Dict[str, Any]] = []
+        all_failed_rows: List[Dict[str, Any]] = []
+        failed_dates = []
 
         async with httpx.AsyncClient() as client:
             tasks = [
@@ -96,9 +110,10 @@ class PoliceStopSearchService:
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
         successful_requests = 0
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Error fetching data for {force}: {result}")
+        for date, result in zip(dates_to_fetch, results):
+            if isinstance(result, BaseException):
+                logger.error(f"Error fetching data for {force} on {date}: {result}")
+                failed_dates.append(date)
                 continue
 
             successful_requests += 1
@@ -106,25 +121,28 @@ class PoliceStopSearchService:
             all_valid_objects.extend(valid_objects)
             all_failed_rows.extend(failed_rows)
 
-        # If all requests failed, raise exception to trigger Celery retry
-        if successful_requests == 0 and dates_to_fetch:
-            first_exception = next((r for r in results if isinstance(r, Exception)), None)
-            if first_exception:
-                raise first_exception
-
-        logger.info(
-            f"Batch processing for {force} complete. "
-            f"Successful requests: {successful_requests}/{len(dates_to_fetch)}. "
-            f"Valid rows: {len(all_valid_objects)}. Failed rows: {len(all_failed_rows)}."
-        )
-
         # Write valid objects to CSV
         valid_csv_path = os.path.join(output_dir, f"valid_{force}.csv")
-        CSVHandler.write_rows(valid_csv_path, all_valid_objects, STOP_SEARCH_COLUMNS)
+        CSVHandler.write_rows(
+            valid_csv_path,
+            all_valid_objects,
+            STOP_SEARCH_COLUMNS,
+            mode="a" if append else "w",
+        )
 
         # Write failed rows to CSV
         failed_csv_path = os.path.join(output_dir, f"failed_{force}.csv")
-        CSVHandler.write_rows(failed_csv_path, all_failed_rows, FAILED_ROW_COLUMNS)
+        CSVHandler.write_rows(
+            failed_csv_path,
+            all_failed_rows,
+            FAILED_ROW_COLUMNS,
+            mode="a" if append else "w",
+        )
+
+        if failed_dates:
+            raise PartialDownloadError(
+                failed_dates, f"Failed to fetch {len(failed_dates)} dates for {force}"
+            )
 
         return valid_csv_path, failed_csv_path
 
@@ -358,7 +376,8 @@ class PoliceStopSearchService:
                         FAILED_ROWS.inc()
                 else:
                     logger.error(
-                        f"Index {idx_int} out of bounds for data list of size {len(data)}"
+                        f"Index {idx_int} out of bounds for data list "
+                        f"of size {len(data)}"
                     )
 
             valid_rows.extend(remediated_valid)
@@ -376,48 +395,39 @@ class PoliceStopSearchService:
         """
         Validate and create a flattened dictionary from a raw item.
         """
-        schema_item = StopSearchBase(**item)
+        location = item.get("location") or {}
+        street = location.get("street") or {}
+        outcome_object = item.get("outcome_object") or {}
 
-        latitude = None
-        longitude = None
-        street_id = None
-        street_name = None
+        dt_value = item.get("datetime")
 
-        if schema_item.location:
-            latitude = schema_item.location.latitude
-            longitude = schema_item.location.longitude
-
-            if schema_item.location.street:
-                street_id = schema_item.location.street.id
-                street_name = schema_item.location.street.name
-
-        outcome_object_id = None
-        outcome_object_name = None
-
-        if schema_item.outcome_object:
-            outcome_object_id = schema_item.outcome_object.id
-            outcome_object_name = schema_item.outcome_object.name
+        if isinstance(dt_value, str):
+            dt_value = datetime.fromisoformat(dt_value.replace("Z", "+00:00"))
 
         return {
             "force": force,
-            "type": schema_item.type,
-            "involved_person": schema_item.involved_person,
-            "datetime": schema_item.datetime,
-            "operation": schema_item.operation,
-            "operation_name": schema_item.operation_name,
-            "latitude": latitude,
-            "longitude": longitude,
-            "street_id": street_id,
-            "street_name": street_name,
-            "gender": schema_item.gender,
-            "age_range": schema_item.age_range,
-            "self_defined_ethnicity": schema_item.self_defined_ethnicity,
-            "officer_defined_ethnicity": schema_item.officer_defined_ethnicity,
-            "legislation": schema_item.legislation,
-            "object_of_search": schema_item.object_of_search,
-            "outcome": schema_item.outcome,
-            "outcome_linked_to_object_of_search": schema_item.outcome_linked_to_object_of_search,
-            "removal_of_more_than_outer_clothing": schema_item.removal_of_more_than_outer_clothing,
-            "outcome_object_id": outcome_object_id,
-            "outcome_object_name": outcome_object_name,
+            "type": item.get("type"),
+            "involved_person": item.get("involved_person"),
+            "datetime": dt_value,
+            "operation": item.get("operation"),
+            "operation_name": item.get("operation_name"),
+            "latitude": location.get("latitude"),
+            "longitude": location.get("longitude"),
+            "street_id": street.get("id"),
+            "street_name": street.get("name"),
+            "gender": item.get("gender"),
+            "age_range": item.get("age_range"),
+            "self_defined_ethnicity": item.get("self_defined_ethnicity"),
+            "officer_defined_ethnicity": item.get("officer_defined_ethnicity"),
+            "legislation": item.get("legislation"),
+            "object_of_search": item.get("object_of_search"),
+            "outcome": item.get("outcome"),
+            "outcome_linked_to_object_of_search": item.get(
+                "outcome_linked_to_object_of_search"
+            ),
+            "removal_of_more_than_outer_clothing": item.get(
+                "removal_of_more_than_outer_clothing"
+            ),
+            "outcome_object_id": outcome_object.get("id"),
+            "outcome_object_name": outcome_object.get("name"),
         }
