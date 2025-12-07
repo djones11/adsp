@@ -110,6 +110,7 @@ class PoliceStopSearchService:
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
         successful_requests = 0
+
         for date, result in zip(dates_to_fetch, results):
             if isinstance(result, BaseException):
                 logger.error(f"Error fetching data for {force} on {date}: {result}")
@@ -117,12 +118,15 @@ class PoliceStopSearchService:
                 continue
 
             successful_requests += 1
+
             valid_objects, failed_rows = result
+
             all_valid_objects.extend(valid_objects)
             all_failed_rows.extend(failed_rows)
 
         # Write valid objects to CSV
         valid_csv_path = os.path.join(output_dir, f"valid_{force}.csv")
+
         CSVHandler.write_rows(
             valid_csv_path,
             all_valid_objects,
@@ -132,6 +136,7 @@ class PoliceStopSearchService:
 
         # Write failed rows to CSV
         failed_csv_path = os.path.join(output_dir, f"failed_{force}.csv")
+
         CSVHandler.write_rows(
             failed_csv_path,
             all_failed_rows,

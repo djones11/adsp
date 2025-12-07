@@ -143,7 +143,7 @@ adsp/
     # Builds images and starts all services in detached mode
     uv run invoke docker.up --build --local
     ```
-    If you any of the assigned ports are already in use, either shut down the processes currently using them or change the port to use in your .env file
+    If any of the assigned ports are already in use, either shut down the processes currently using them or change the port to use in your .env file
 
 5.  **Apply Database Migrations**:
     The application should auto-migrate on startup, but you can ensure the schema is created:
@@ -191,32 +191,66 @@ Uses `invoke` to manage common tasks. Run `uv run invoke --list` to see all avai
 
 ## 📐 Design Decisions & Trade-offs
 
-### 1. Latency Reduction & Performance
-*   **Pandas & Pandera**: Uses **Pandas** DataFrames to avoid row-by-row dictionary processing. This allows for vectorized operations (like cleaning empty strings or type conversion) which are significantly faster for large datasets. **Pandera** provides declarative schema validation, ensuring data integrity before it hits the database. Avoided converting incoming API data to pydantic models on ingestion to improve performance using strictly dataframes.
-*   **Asyncio**: The data fetching layer uses `asyncio` and `httpx` to fetch multiple months of data concurrently, rather than sequentially. This drastically reduces the time spent waiting on network I/O from the Police API.
-*   **Celery Task Splitting**: Queries for each police force are distributed across multiple Celery workers using **chords and groups**, allowing concurrent execution of tasks and efficient aggregation of results.
-*   **Bulk Operations**: Database writes use the `COPY` command, which is the fastest way to insert data into PostgreSQL, bypassing the overhead of individual `INSERT` statements.
+### 1. Data Processing & Performance
+*   **Decision**: Use **Pandas** for data manipulation and **Pandera** for validation, coupled with **Asyncio** for fetching and **PostgreSQL COPY** for insertion.
+*   **Reasoning**: The volume of data requires efficient in-memory processing and fast I/O. Python dictionaries and standard SQL inserts are too slow for bulk operations.
+*   **Pros**:
+    *   **Vectorized Operations**: Pandas processes entire columns at once, orders of magnitude faster than loops.
+    *   **Declarative Validation**: Pandera ensures data quality with a clear schema definition.
+    *   **Concurrency**: Asyncio allows fetching multiple months of data simultaneously without blocking.
+    *   **Write Speed**: `COPY` is the most efficient way to load data into Postgres.
+*   **Cons**:
+    *   **Memory Usage**: Pandas loads data into memory, which can be resource-intensive for very large files (mitigated by chunking if necessary).
+    *   **Complexity**: Async code is harder to debug than synchronous code. A failure in a COPY command is also more complicated to recover from for partial inserts as opposed to inserting on a row by row basis.
+    *   **Duplication**: Schemas for both pandera and pydantic need to be maintained as they are used in different places.
+    *   **Container size**: Loading Pandas and Pandera increases the size of the container over just using Pydantic    
+    *   **Rate limiting**: Calling the police API using async calls leads to frequent rate limiting, which needs additional code to handle gracefully.
+*   **Alternatives**:
+    *   **Row-by-row processing**: Simpler but too slow for large datasets.
+    *   **Spark/Dask**: Better for massive scale (TB+), but overkill for this dataset size and adds significant infrastructure overhead.
 
 ### 2. Database: PostgreSQL (SQL)
-*   **Decision**: Used a relational database (PostgreSQL) over NoSQL.
-*   **Reasoning**:
-    *   The stop and search data is highly structured with a consistent schema defined by the Police API. Relational databases offer strong data integrity, powerful querying capabilities (essential for the "downstream usage" requirement), and ACID compliance.
-    *   It isn't clear how the data will be used by the downstream user so a relational database offers the greatest flexibility.
-*   **Schema Design**:
-    *   `stop_searches`: Main table with indexed columns (`force`, `datetime`) for fast time-series and geographical querying.
-    *   `failed_rows`: A separate table using `JSONB` to store raw rows that failed validation. This ensures the ingestion pipeline doesn't crash on bad data, allowing for post-mortem analysis and reprocessing.
+*   **Decision**: Use a relational database (**PostgreSQL**) instead of a NoSQL store.
+*   **Reasoning**: The stop and search data is highly structured with a consistent schema defined by the Police API. Downstream usage patterns are unknown, so a relational model offers the most flexibility for querying.
+*   **Pros**:
+    *   **Data Integrity**: Strong typing and constraints ensure data quality.
+    *   **Complex Querying**: SQL allows for powerful joins, aggregations, and geospatial queries.
+    *   **ACID Compliance**: Ensures reliability of transactions.
+    *   **Flexibility** Allows for more flexible access patterns when it is unknown how the user will interact with the data downstream
+*   **Cons**:
+    *   **Rigid Schema**: Schema migrations are required for changes (handled by Alembic).
+    *   **Scaling**: Vertical scaling is easier than horizontal scaling compared to some NoSQL solutions.
+*   **Alternatives**:
+    *   **MongoDB**: Flexible schema, but lacks the powerful analytical querying capabilities of SQL.
+    *   **Elasticsearch**: Great for searching, but not ideal as a primary source of truth for relational data.
 
 ### 3. Asynchronous Processing: Celery
-*   **Decision**: Decoupled ingestion logic from the web server using Celery.
-*   **Reasoning**: Fetching data from external APIs is I/O bound and potentially slow. Celery allows for:
-    *   **Scalability**: More workers can be added to process multiple forces in parallel.
-    *   **Resilience**: Built-in retry mechanisms for network glitches.
-    *   **Scheduling**: `celery-beat` handles the "daily schedule" requirement natively.
-    *   **Non-blocking**: Allows access to the web API even during ingestion.
+*   **Decision**: Decouple ingestion logic using **Celery** with **RabbitMQ** (broker) and **Redis** (backend).
+*   **Reasoning**: Fetching data from external APIs is I/O bound, slow, and prone to failure. The web server must remain responsive.
+*   **Pros**:
+    *   **Scalability**: Workers can be scaled horizontally to process multiple forces in parallel.
+    *   **Resilience**: Built-in support for retries and exponential backoff.
+    *   **Scheduling**: `celery-beat` natively handles the daily ingestion schedule.
+*   **Cons**:
+    *   **Operational Complexity**: Requires managing two additional services (RabbitMQ, Redis), although Redis is also used by the web API.
+    *   **Debugging**: Tracing issues across distributed components can be challenging.
+*   **Alternatives**:
+    *   **FastAPI BackgroundTasks**: Simpler, but lacks persistence (tasks lost on restart) and distributed capabilities.
+    *   **Cron Jobs**: Harder to monitor and integrate with the application logic.
 
-### 4. Observability
-*   **Decision**: Integrated a full monitoring stack.
-*   **Reasoning**: In a production environment, knowing *if* the daily job ran and *how many* rows failed is critical. Prometheus metrics track success/failure rates, while Loki aggregates logs for debugging.
+### 4. Observability Stack
+*   **Decision**: Implement a full PLG stack (**Prometheus**, **Loki**, **Grafana**).
+*   **Reasoning**: In production, "blindly" running background tasks is risky. We need to know *when* tasks fail and *why*.
+*   **Pros**:
+    *   **Unified View**: Metrics and logs are correlated in a single dashboard.
+    *   **Alerting**: Prometheus can trigger alerts on high failure rates.
+    *   **Standardization**: Industry-standard tools that are widely supported.
+*   **Cons**:
+    *   **Resource Overhead**: Running the full stack consumes significant CPU/RAM (mitigated by using lightweight agents like Promtail).
+    *   **Setup Complexity**: Requires configuring multiple datasources and dashboards.
+*   **Alternatives**:
+    *   **SaaS (Datadog/New Relic)**: Easier setup but expensive.
+    *   **ELK Stack (Elasticsearch, Logstash, Kibana)**: Heavier resource footprint than Loki for simple log aggregation.
 
 ---
 
@@ -224,11 +258,13 @@ Uses `invoke` to manage common tasks. Run `uv run invoke --list` to see all avai
 
 The application includes a pre-configured Grafana dashboard to visualize metrics.
 
-1.  **Access Grafana**: Open [http://localhost:3000](http://localhost:3000) in your browser.
+1.  **Access Grafana**: Open [http://localhost:3000](http://localhost:3000) (or your user defined Grafana port) in your browser.
 2.  **Login**:
     *   **Username**: `admin` (or value of `GRAFANA_ADMIN_USER` in `.env`)
     *   **Password**: `admin` (or value of `GRAFANA_ADMIN_PASSWORD` in `.env`)
 3.  **Dashboards**: Navigate to **Dashboards** to see the pre-provisioned "ADSP Overview" dashboard.
+
+Can also be accessed by running `uv run invoke grafana` in your CLI.
 
 **What you can see:**
 *   **Ingestion Metrics**: Number of records processed, success vs. failure rates.
@@ -254,6 +290,7 @@ To take this solution to production, the following steps are recommended:
 3.  **Reliability**:
     *   **Dead Letter Queues (DLQ)**: Configure RabbitMQ DLQs for tasks that fail repeatedly to prevent them from clogging the queue.
     *   **Circuit Breakers**: Implement circuit breakers for the Police API calls to prevent cascading failures during outages.
+    *   **Kubernetes**: Implement Kubernetes for better scaling, self healing and container replicas to ensure availability and automatic scaling.
 
 4.  **CI/CD**:
     *   Implement a pipeline (GitHub Actions/GitLab CI) to run tests (`invoke web.test`), linting, and type checking on every commit.
