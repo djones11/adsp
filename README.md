@@ -152,7 +152,9 @@ adsp/
 
 ---
 
-## 🛠️ Available Commands
+## 🛠️ Available Commands and Usage
+
+Configurations for the project, such as ports, the forces to query and querying time should be configured in a .env file at the root of your project - use the .env.example file as the template
 
 Uses `invoke` to manage common tasks. Run `uv run invoke --list` to see all available commands.
 
