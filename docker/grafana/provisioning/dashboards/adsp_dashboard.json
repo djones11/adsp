@@ -856,7 +856,7 @@
       },
       "targets": [
         {
-          "expr": "{container=~\"adsp-worker-1\"}",
+          "expr": "{service=\"worker\"}",
           "refId": "A"
         }
       ],
@@ -883,7 +883,7 @@
       },
       "targets": [
         {
-          "expr": "{container=~\"adsp-web-1\"}",
+          "expr": "{service=\"web\"}",
           "refId": "A"
         }
       ],

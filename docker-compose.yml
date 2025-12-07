@@ -32,7 +32,7 @@ services:
   redis-exporter:
     image: oliver006/redis_exporter
     environment:
-      - REDIS_ADDR=redis:${REDIS_PORT}
+      - REDIS_ADDR=redis:6379
     depends_on:
       - redis
     ports:
@@ -41,7 +41,7 @@ services:
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter
     environment:
-      - DATA_SOURCE_NAME=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=disable
+      - DATA_SOURCE_NAME=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
     depends_on:
       - db
     ports:
@@ -50,7 +50,7 @@ services:
   rabbitmq-exporter:
     image: kbudde/rabbitmq-exporter
     environment:
-      - RABBIT_URL=http://rabbitmq:${RABBITMQ_UI_PORT}
+      - RABBIT_URL=http://rabbitmq:15672
       - RABBIT_USER=${RABBITMQ_DEFAULT_USER}
       - RABBIT_PASSWORD=${RABBITMQ_DEFAULT_PASS}
     depends_on:
@@ -75,9 +75,9 @@ services:
       redis:
         condition: service_started
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/${POSTGRES_DB}
-      - CELERY_BROKER_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:${RABBITMQ_PORT}//
-      - CELERY_RESULT_BACKEND=redis://redis:${REDIS_PORT}/0
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - CELERY_BROKER_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
 
   worker:
     build:
@@ -93,9 +93,9 @@ services:
       - rabbitmq
       - redis
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/${POSTGRES_DB}
-      - CELERY_BROKER_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:${RABBITMQ_PORT}//
-      - CELERY_RESULT_BACKEND=redis://redis:${REDIS_PORT}/0
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - CELERY_BROKER_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
 
   beat:
@@ -110,9 +110,9 @@ services:
       - rabbitmq
       - redis
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/${POSTGRES_DB}
-      - CELERY_BROKER_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:${RABBITMQ_PORT}//
-      - CELERY_RESULT_BACKEND=redis://redis:${REDIS_PORT}/0
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - CELERY_BROKER_URL=amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
 
   prometheus:
     image: prom/prometheus

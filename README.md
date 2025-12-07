@@ -143,6 +143,7 @@ adsp/
     # Builds images and starts all services in detached mode
     uv run invoke docker.up --build --local
     ```
+    If you any of the assigned ports are already in use, either shut down the processes currently using them or change the port to use in your .env file
 
 5.  **Apply Database Migrations**:
     The application should auto-migrate on startup, but you can ensure the schema is created:
