@@ -156,6 +156,8 @@ adsp/
 
 Configurations for the project, such as ports, the forces to query and querying time should be configured in a .env file at the root of your project - use the .env.example file as the template
 
+By default the system has been set up to query 3 police forces and backfill all available data on initial ingestion, however subsequent ingestions will only query and fill in data for months that have not already been processed previously.
+
 Uses `invoke` to manage common tasks. Run `uv run invoke --list` to see all available commands.
 
 ### Docker Management
