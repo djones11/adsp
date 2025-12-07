@@ -156,7 +156,7 @@ def get_stop_searches(
     Retrieve stop and search data from the API.
     Example of usage of the stop-searches endpoint.
     """
-    url = f"http://localhost:{WEB_PORT}/v1/stop-searches"
+    url = f"http://localhost:{WEB_PORT}/v1/stop-searches/"
     params = [f"page={page}", f"page_size={limit}"]
 
     if force:
